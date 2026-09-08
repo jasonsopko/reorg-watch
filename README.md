@@ -1,7 +1,12 @@
 # reorg-watch
 
 Watches a Bitcoin Knots node for chain reorganizations, names the pools on
-both sides, and mails you when one is deep enough to matter.
+both sides, and mails you when one is deep enough to matter. It also follows
+the rewards: which pool has moved how much of what it mined, and whether one
+wallet is collecting under more than one pool name.
+
+Everything comes from the node's REST interface. No electrs, no address
+index, no RPC credentials.
 
 A node's built-in fork warning fires only when it sees an invalid chain with
 six blocks more work than its own. A reorg made of valid blocks, which is
@@ -28,11 +33,66 @@ tag, matched against Kilombino's `pools-v2.json`, the list mempool.guide and
 mempool.kilombino.com use. Tags are self-declared. Treat names as claims,
 not proof.
 
+## Reward flow
+
+The watcher keeps its own small index instead of asking an address indexer:
+every coinbase output since the fork, about 8,000 entries, built once from
+the raw blocks in half a minute and then extended one block at a time. Each
+new block's inputs are checked against it, so every spend of a mining reward
+is caught the minute it confirms.
+
+From that it reports, per pool: blocks, BTC mined, matured, moved, held, and
+the last movement with its shape. Payout means three or more outputs, sweep
+means several rewards into one or two outputs, transfer means one reward to
+one or two outputs. Moved means a coinbase output was spent. The chain shows
+movement, not a sale.
+
+It also reads who built each block's template from the coinbase layout the
+DATUM gateway writes: height push, one tag push (primary, 0x0F, secondary,
+0x00), a unique-id push of 3 bytes when the gateway runs standalone or 7 or
+more when a DATUM pool is upstream, then the 14-byte extranonce push. That
+gives three classes:
+
+- **DATUM pool**: the miner's own gateway and node built the block. The pool
+  only coordinated payout and could not have chosen the transactions.
+- **Gateway, stratum v1**: the gateway software running standalone, so the
+  node of whoever owns the payout address built the block. For a pool label
+  that is the pool's node; for a solo label it is the miner's.
+- **Other software**: a coinbase this tool does not recognize.
+
+Per block the page shows the tags, transaction count, coinbase outputs,
+reward, fees, and the header fields that say how it was mined: the ASIC
+profile (low two bits of the flags byte), whether the gateway allowed the
+hasher to roll the timestamp (flag bit 4) and the offset it recorded, whether
+the Sia time slot (nonce3) carries the timestamp, and whether the xor mask
+was used. Every BLAKE2b block has three nonce fields by design; per pool the template mix and how the reward leaves the
+block (one output kept by the pool, two outputs, or paid directly to miners
+in the coinbase).
+
+It also merges labels that belong to one wallet: labels whose blocks pay the
+same pool address, or whose pool addresses are spent together. A pool that
+lets miners write their own tag into the coinbase shows up as one wallet
+with many labels, which is the honest picture of who built those blocks.
+A pool's address is one paid in at least 90 percent of that label's blocks;
+miners paid directly in a coinbase recur far less and do not count.
+
+| Event | Level | Meaning |
+|---|---|---|
+| reward sweep | INFO | At least `--sweep-btc` BTC of rewards (default 10) moved into one or two outputs. |
+| label overlap | ALERT | Two pool names with at least 100 blocks each turn out to share a wallet. |
+| wallet share | ALERT | One wallet with more than one label mined a third or more of the last 24 hours. |
+
+`--no-rewards` turns all of this off.
+
+`--tz America/New_York` renders every time on the page in that zone, with
+the zone name in the hourly heading and the timestamp. Logs and the JSON
+files always stay in UTC. Requires Python 3.9 for `zoneinfo`.
+
 ## Requirements
 
 - Bitcoin Knots with `rest=1` in bitcoin.conf. REST is unauthenticated on
   localhost, so the watcher runs as any local user and needs no RPC cookie.
-- Python 3.8 or later. Standard library only.
+- Python 3.9 or later. Standard library only.
 - Outbound HTTPS to mempool.guide and raw.githubusercontent.com. Without it,
   run with `--explorer ""` and live without the cross-check; attribution
   falls back to address prefixes.
@@ -73,6 +133,7 @@ Everything lives in `~/.reorg-watch/` (change with `--state`):
   Heights, hashes, pool names, timestamps. No local paths.
 - `events.jsonl`: one JSON object per event, for scripts.
 - `state.json`: the saved window, one attribution record per block, and counters.
+- `rewards.json`: every coinbase output since the fork and every transaction that spent one.
 - `pools-v2.json`: cached pool list, refreshed every six hours.
 
 `reorg-watch.py --report` prints the tip, the window, the explorer counters,
@@ -101,8 +162,13 @@ so the watcher saw a depth-2 reorg against the live chain:
 ## Status page
 
 `--html FILE` writes a self-contained page after every run: node and explorer
-status, blocks by pool for the last 24 hours with an hourly breakdown, and
-recent events. One file, no external assets, no scripts beyond a staleness
+status, blocks by pool for the last 24 hours with an hourly breakdown, reward
+flow and blocks by wallet, latest blocks, recent reward movements, and recent
+events. Every column header and every classification says how it was
+determined on hover or focus, and a "How this page decides" section at the
+bottom repeats the method in plain text for readers on phones. Tables never
+scroll sideways: they use fixed layout with wrapping, and below about 700px
+each row reflows into labeled lines. One file, no external assets, no scripts beyond a staleness
 check. Serve it from wherever you already serve static files.
 
 Pool names are HTML-escaped on the way out. Coinbase tags are text the miner
@@ -136,7 +202,13 @@ downloaded show as `unknown (no block data)`.
   that is all it is.
 - Polls once a minute. A reorg done and undone inside a minute is missed.
 - Attribution is only as good as the pools list, and a coinbase tag can be
-  spoofed. Payout addresses are harder to fake and are matched first.
+  spoofed. Payout addresses are harder to fake and are matched first, which
+  has one known wart: a block whose coinbase pays a listed pool's address
+  because that pool's operator won another pool's lottery is credited to the
+  listed pool, not to the pool whose tag it carries.
+- The template classes come from one piece of software's coinbase layout.
+  A pool running something else lands in Other software even if it is a
+  plain stratum v1 server.
 - Depth-1 reorgs are noise at five-minute block intervals and are not alerts.
   Change that with `--alert-depth 1`.
 - Anything deeper than the window is reported as beyond the window, without
@@ -157,7 +229,10 @@ mainnet Bitcoin Knots 29.4.1 node:
 - an unreachable explorer, checking that it stays quiet for ten runs;
 - a run from a cron-like empty environment;
 - a real mail delivery through a local postfix relay;
-- the status page against a hostile pool name, checking it renders as text.
+- the status page against a hostile pool name, checking it renders as text;
+- the reward index against an independent scan of the same blocks (same
+  spend count, same wallet clusters), and a reorg rollback that must drop and
+  rebuild the affected heights without re-announcing old movements.
 
 ## License
 
