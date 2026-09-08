@@ -72,7 +72,7 @@ Everything lives in `~/.reorg-watch/` (change with `--state`):
 - `reorg-log.md`: the human-readable log, written to be published as is.
   Heights, hashes, pool names, timestamps. No local paths.
 - `events.jsonl`: one JSON object per event, for scripts.
-- `state.json`: the saved window and counters.
+- `state.json`: the saved window, one attribution record per block, and counters.
 - `pools-v2.json`: cached pool list, refreshed every six hours.
 
 `reorg-watch.py --report` prints the tip, the window, the explorer counters,
@@ -96,6 +96,24 @@ so the watcher saw a depth-2 reorg against the live chain:
   - 969652 AlphaPool `0000000000000008290e8516e2d2594335bf486a5ec8fd4b0145e4dced856029` (11 tx, 2026-09-08 00:50:00Z)
   - 969653 AlphaPool `00000000000000006987397fc100f08aec2f24f710b36a1d1f36e69137100cb1` (4 tx, 2026-09-08 00:50:10Z)
 - New tip: 969806 `000000000000000088cc70f5b95804bb184eba1d9c93500314ac249bb2057a88` (153 further blocks)
+```
+
+## Status page
+
+`--html FILE` writes a self-contained page after every run: node and explorer
+status, blocks by pool for the last 24 hours with an hourly breakdown, and
+recent events. One file, no external assets, no scripts beyond a staleness
+check. Serve it from wherever you already serve static files.
+
+Pool names are HTML-escaped on the way out. Coinbase tags are text the miner
+chose and must never reach a browser raw.
+
+The page refreshes itself every five minutes and shows a red banner when it
+is more than 15 minutes old, so a dead generator is visible to readers
+instead of silent.
+
+```
+* * * * * $HOME/bin/reorg-watch.py --html /var/www/reorg/index.html --notify 'mail -s "reorg-watch ALERT" you@example.com' >> $HOME/reorg-watch.log 2>&1
 ```
 
 ## How it decides
@@ -138,8 +156,11 @@ mainnet Bitcoin Knots 29.4.1 node:
   behind alert on the third;
 - an unreachable explorer, checking that it stays quiet for ten runs;
 - a run from a cron-like empty environment;
-- a real mail delivery through a local postfix relay.
+- a real mail delivery through a local postfix relay;
+- the status page against a hostile pool name, checking it renders as text.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See `LICENSE`. The knot mark in the status page header is the Bitcoin
+Knots logo from the Knots repository (`src/qt/res/src/bitcoinknots-logo.svg`),
+also MIT, designed by Kurtis Stirling, Blissmode, Skyler, and Steven Hay.
