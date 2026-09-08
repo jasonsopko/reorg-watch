@@ -84,9 +84,12 @@ miners paid directly in a coinbase recur far less and do not count.
 
 `--no-rewards` turns all of this off.
 
-`--tz America/New_York` renders every time on the page in that zone, with
-the zone name in the hourly heading and the timestamp. Logs and the JSON
-files always stay in UTC. Requires Python 3.9 for `zoneinfo`.
+Times on the page are shown in the viewer's own time zone: each timestamp
+carries its epoch, and a few lines of script re-render them on load, zone
+name included. Without JavaScript the page shows the server's zone, UTC by
+default or whatever `--tz America/New_York` names. Hour buckets are whole
+hours, so half-hour zones see labels like 13:30. Logs and the JSON files
+always stay in UTC. Requires Python 3.9 for `zoneinfo`.
 
 ## Requirements
 

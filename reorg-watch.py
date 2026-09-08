@@ -45,8 +45,10 @@ Usage: reorg-watch.py [--init] [--report] [--state DIR] [--rest URL]
   --no-rewards    skip the reward-flow index (saves the one-time backfill)
   --sweep-btc N   log a reward movement of at least N BTC into one or two
                   outputs as an event (default 10; 0 disables)
-  --tz ZONE       time zone for the status page, e.g. America/New_York
-                  (default UTC; logs and JSON files always use UTC)
+  --tz ZONE       time zone for the status page as rendered by the server,
+                  e.g. America/New_York; browsers with JavaScript re-render
+                  every time in the viewer's own zone (default UTC; logs and
+                  JSON files always use UTC)
 
 Files in the state dir: state.json, rewards.json, events.jsonl,
 reorg-log.md, pools-v2.json (cache), lock.
@@ -86,6 +88,13 @@ PAGE_TZ = ZoneInfo("UTC")
 def tsz(t=None, fmt="%Y-%m-%d %H:%M:%S %Z"):
     """Page-facing time in the --tz zone; logs and JSON stay UTC."""
     return datetime.fromtimestamp(NOW if t is None else t, PAGE_TZ).strftime(fmt)
+
+
+def tt(t, fmt="full"):
+    """Server-rendered time (in --tz) wrapped so the page script can show it in the viewer's zone.
+    fmt: full = Y-m-d H:M:S zone, minute = Y-m-d H:M, clock = H:M:S, short = m-d H:M, hour = H:00."""
+    py = {"full": "%Y-%m-%d %H:%M:%S %Z", "minute": "%Y-%m-%d %H:%M", "clock": "%H:%M:%S", "short": "%m-%d %H:%M", "hour": "%H:%M"}[fmt]
+    return f'<time data-epoch="{int(t)}" data-fmt="{fmt}">{html.escape(tsz(t, py))}</time>'
 
 
 def hour_floor(t):
@@ -808,7 +817,7 @@ TIPS = {
     "blocks24": "Blocks whose header time falls in the last 24 hours. Shares are block counts and carry a few points of statistical noise.",
     "share24": "This pool's blocks divided by all blocks in the last 24 hours.",
     "builder": "Read from the coinbase layout the DATUM gateway writes. DATUM pool: the unique-id push is 7 or more bytes, which the gateway writes only with a DATUM pool upstream, so the miner's own node built the block. Gateway, stratum v1: a 3-byte unique-id push, the gateway running standalone, so the node of whoever owns the payout address built the block. Other software: a coinbase this page does not recognize.",
-    "hour": "Hour by block header time, in the zone shown in the heading. The current hour is still filling.",
+    "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
     "hourshare": "This pool's share of that hour's blocks. The three columns are the three largest pools of the day. Cells at or above half are marked.",
     "blocks_fork": "All blocks this label has mined since the BLAKE2b fork block.",
     "payout": "Median number of value-bearing outputs in this pool's coinbases. One output means the pool keeps the reward and pays miners later; two is a split; three or more is paid directly to miners in the coinbase.",
@@ -823,7 +832,7 @@ TIPS = {
     "wallet24": "Blocks in the last 24 hours across every label in this wallet.",
     "wallet_fork": "Blocks since the fork across every label in this wallet.",
     "height": "Block height.",
-    "time": "Block header time, set by the miner, shown in the zone named in the page header.",
+    "time": "Block header time, set by the miner, shown in your browser's time zone (the server's zone without JavaScript).",
     "tags": "The primary and secondary coinbase tags as the gateway wrote them: pool or operator first, then the miner's own tag.",
     "txs": "Transactions in the block, including the coinbase.",
     "outputs": "Value-bearing outputs of the coinbase transaction.",
@@ -905,7 +914,7 @@ def render_html(path, sd, st):
     for i in range(23, -1, -1):
         lo = h0 - i * 3600
         hb = [b for b in day if lo <= b["time"] < lo + 3600]
-        row = {"label": tsz(lo, "%H:00"), "n": len(hb), "na": lo + 3600 <= earliest}
+        row = {"label": tt(lo, "hour"), "n": len(hb), "na": lo + 3600 <= earliest}
         for c in cols:
             row[c] = sum(1 for b in hb if pool_group(b["pool"]) == c)
         hours.append(row)
@@ -920,7 +929,7 @@ def render_html(path, sd, st):
         sel = [e for e in reorgs if now - e["_t"] < window]
         return ", ".join(f"depth {d}: {sum(1 for e in sel if e['depth'] == d)}" for d in sorted({e["depth"] for e in sel})) or "none"
     alerts = [e for e in evs if e.get("level") == "ALERT"]
-    last_alert = tsz(alerts[-1]["_t"]) if alerts else "none recorded"
+    last_alert = tt(alerts[-1]["_t"]) if alerts else "none recorded"
 
     tip_h, tip_hash = st.get("tip_height"), st.get("tip_hash", "")
     ex = st.get("explorer_url") or ""
@@ -991,7 +1000,7 @@ def render_html(path, sd, st):
             lvl = e.get("level", "INFO")
             if line.startswith(lvl + " "):
                 line = line[len(lvl) + 1:]
-            out.append(f"<tr><td class=t>{tsz(e['_t'], '%Y-%m-%d %H:%M')}</td><td class={'alert' if lvl == 'ALERT' else 'info'}>{lvl}</td><td>{E(line)}</td></tr>")
+            out.append(f"<tr><td class=t>{tt(e['_t'], 'minute')}</td><td class={'alert' if lvl == 'ALERT' else 'info'}>{lvl}</td><td>{E(line)}</td></tr>")
         return "\n".join(out) or "<tr><td colspan=3 class=note>none yet</td></tr>"
 
     hour_heads = "".join(f"<th class=n>{E(c)}</th>" for c in cols)
@@ -1014,7 +1023,7 @@ def render_html(path, sd, st):
             return "1 output, pool custody" if med <= 1 else ("2 outputs" if med == 2 else f"direct, median {med} outputs")
         for label, p in summ[:12]:
             pct = f"{100 * p['moved'] / p['matured']:.0f}%" if p["matured"] else "-"
-            last = f"{tsz(p['last_t'], '%Y-%m-%d %H:%M')}<br>{p['last_kind']}" if p["last_t"] else "never"
+            last = f"{tt(p['last_t'], 'minute')}<br>{p['last_kind']}" if p["last_t"] else "never"
             reward_rows += (f"<tr><td>{E(label)}</td><td class=n>{p['blocks']}</td><td>{template_mix(p['cls'])}</td><td>{E(payout_style(p['nouts']))}</td>"
                             f"<td class=n>{p['mined'] / 1e8:.2f}</td><td class=n>{p['matured'] / 1e8:.2f}</td><td class=n>{p['moved'] / 1e8:.2f}</td><td class=n>{pct}</td>"
                             f"<td class=n>{(p['mined'] - p['moved']) / 1e8:.2f}</td><td class=t>{last}</td></tr>")
@@ -1024,12 +1033,12 @@ def render_html(path, sd, st):
             fee = reward_total - subsidy(c["h"])
             tag = c.get("tags", ["", ""])
             tagtxt = " / ".join(t for t in tag if t)
-            block_rows += (f"<tr><td class=n>{c['h']}</td><td class=t>{tsz(c['t'], '%H:%M:%S')}</td><td>{E(c['label'])}</td><td>{tipped(CLASS_NAMES[c.get('cls', 'O')], CLASS_TIPS[c.get('cls', 'O')])}</td>"
+            block_rows += (f"<tr><td class=n>{c['h']}</td><td class=t>{tt(c['t'], 'clock')}</td><td>{E(c['label'])}</td><td>{tipped(CLASS_NAMES[c.get('cls', 'O')], CLASS_TIPS[c.get('cls', 'O')])}</td>"
                            f"<td class=note>{E(tagtxt[:40])}</td><td class=note>{E(describe_header(c.get('hdr')))}</td><td class=n>{c.get('ntx', '-')}</td><td class=n>{len(c['outs'])}</td>"
                            f"<td class=n>{reward_total / 1e8:.4f}</td><td class=n>{max(fee, 0) / 1e8:.5f}</td></tr>")
         for x in sorted(rw.d["spends"], key=lambda x: -x["h"])[:12]:
             who = ", ".join(f"{E(k)} {v / 1e8:.3f}" for k, v in sorted(x["labels"].items(), key=lambda kv: -kv[1]))
-            move_rows += (f"<tr><td class=t>{tsz(x['t'], '%m-%d %H:%M')}</td><td class=n>{x['h']}</td><td>{who}</td><td class=n>{x['cb_sats'] / 1e8:.3f}</td>"
+            move_rows += (f"<tr><td class=t>{tt(x['t'], 'short')}</td><td class=n>{x['h']}</td><td>{who}</td><td class=n>{x['cb_sats'] / 1e8:.3f}</td>"
                           f"<td class=n>{x['n_cb']}</td><td class=n>{x['n_out']}</td><td>{tipped(x['kind'], KIND_TIPS.get(x['kind'], ''))}</td></tr>")
         groups = rw.wallet_groups()
         since = {}
@@ -1142,7 +1151,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 </head>
 <body>
 <header><div class="bar">{knot}<div><h1>Bitcoin Knots reorg watch</h1>
-<p class="sub">Chain reorganizations and pool shares on the BLAKE2b chain, from one Bitcoin Knots node. Generated <span id="gen" data-epoch="{int(now)}">{E(tsz(now))}</span>.</p></div></div></header>
+<p class="sub">Chain reorganizations and pool shares on the BLAKE2b chain, from one Bitcoin Knots node. Generated {tt(now)}. Times are shown in your browser's time zone, <span class="tzname">{E(tsz(now, "%Z"))}</span> right now.</p></div></div></header>
 <main>
 <div id="stale">This page is more than 15 minutes old. The generator or the upload has stopped; treat everything below as stale.</div>
 
@@ -1151,7 +1160,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <div class="card"><div class="k">{tipped("Explorer", TIPS["explorer"])}</div><div class="v {agree[0]}">{ex_link if ex else ""} {E(agree[1])}</div></div>
 <div class="card"><div class="k">{tipped("Reorgs, 24 h", TIPS["reorgs"])}</div><div class="v">{E(depth_counts(86400))}</div></div>
 <div class="card"><div class="k">{tipped("Reorgs, 7 d", TIPS["reorgs"])}</div><div class="v">{E(depth_counts(7 * 86400))}</div></div>
-<div class="card"><div class="k">{tipped("Last alert", TIPS["last_alert"])}</div><div class="v">{E(last_alert)}</div></div>
+<div class="card"><div class="k">{tipped("Last alert", TIPS["last_alert"])}</div><div class="v">{last_alert}</div></div>
 <div class="card"><div class="k">{tipped("Tip", TIPS["tip"])}</div><div class="v">{tip_h}<br>{tip_html}</div></div>
 </div>
 
@@ -1162,7 +1171,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 {rows_shares()}
 </table></div>
 
-<h2>By hour, {E(tsz(now, "%Z"))}</h2>
+<h2>By hour, <span class="tzname">{E(tsz(now, "%Z"))}</span></h2>
 <p class="note">Most recent hour first. Share of that hour's blocks for the three largest pools of the day. Cells at or above half are marked.</p>
 <div class="wrap"><table class="hours">
 <tr>{th("Hour", "hour")}{th("Blocks", "blocks24", "n")}{hour_heads}</tr>
@@ -1220,8 +1229,29 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. One node's view, cross-checked once a minute against {ex_link}, whose explorer also has the block-by-block detail. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Window {len(st.get('chain', {}))} heights.</footer>
 <script>
 (function () {{
-  var gen = 1000 * parseInt(document.getElementById('gen').getAttribute('data-epoch'), 10);
+  var gen = 1000 * parseInt(document.querySelector('.sub time[data-epoch]').getAttribute('data-epoch'), 10);
   if (!isNaN(gen) && Date.now() - gen > 15 * 60 * 1000) document.getElementById('stale').style.display = 'block';
+  // Re-render every timestamp in the viewer's own time zone; the server text stays as the fallback.
+  var pad = function (n) {{ return (n < 10 ? '0' : '') + n; }};
+  var zone = '';
+  try {{
+    var parts = new Intl.DateTimeFormat(undefined, {{ timeZoneName: 'short' }}).formatToParts(new Date());
+    for (var i = 0; i < parts.length; i++) if (parts[i].type === 'timeZoneName') zone = parts[i].value;
+  }} catch (e) {{}}
+  var els = document.querySelectorAll('time[data-epoch]');
+  for (var j = 0; j < els.length; j++) {{
+    var el = els[j], d = new Date(1000 * parseInt(el.getAttribute('data-epoch'), 10));
+    if (isNaN(d.getTime())) continue;
+    var Y = d.getFullYear(), M = pad(d.getMonth() + 1), D = pad(d.getDate()), h = pad(d.getHours()), m = pad(d.getMinutes()), s = pad(d.getSeconds());
+    var f = el.getAttribute('data-fmt'), out;
+    if (f === 'full') out = Y + '-' + M + '-' + D + ' ' + h + ':' + m + ':' + s + (zone ? ' ' + zone : '');
+    else if (f === 'minute') out = Y + '-' + M + '-' + D + ' ' + h + ':' + m;
+    else if (f === 'clock') out = h + ':' + m + ':' + s;
+    else if (f === 'short') out = M + '-' + D + ' ' + h + ':' + m;
+    else if (f === 'hour') out = h + ':' + m;
+    if (out) el.textContent = out;
+  }}
+  if (zone) {{ var zs = document.querySelectorAll('.tzname'); for (var k = 0; k < zs.length; k++) zs[k].textContent = zone; }}
 }})();
 </script>
 </body>
