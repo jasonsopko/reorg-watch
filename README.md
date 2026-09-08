@@ -164,6 +164,16 @@ so the watcher saw a depth-2 reorg against the live chain:
 
 ## Status page
 
+The page opens with a strip of the most recent blocks and a donut of the last
+24 hours of pool share, both in the mempool.space idiom. One colour set,
+assigned to the day's top seven pools in a fixed order and reused by the strip
+and the ring, so a pool reads the same in both; everyone else is grey. The
+colours were checked with the data-viz validator for colourblind separation
+and contrast in light and dark, and identity is carried by the legend and the
+block labels, never colour alone.
+
+## Status page
+
 `--html FILE` writes a self-contained page after every run: node and explorer
 status, blocks by pool for the last 24 hours with an hourly breakdown, reward
 flow and blocks by wallet, latest blocks, recent reward movements, and recent

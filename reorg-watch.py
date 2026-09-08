@@ -93,6 +93,10 @@ def tsz(t=None, fmt="%Y-%m-%d %H:%M:%S %Z"):
 def tt(t, fmt="full"):
     """Server-rendered time (in --tz) wrapped so the page script can show it in the viewer's zone.
     fmt: full = Y-m-d H:M:S zone, minute = Y-m-d H:M, clock = H:M:S, short = m-d H:M, hour = H:00."""
+    if fmt == "ago":
+        secs = max(0, int(NOW) - int(t))
+        txt = f"{secs}s" if secs < 60 else (f"{secs // 60}m" if secs < 3600 else (f"{secs // 3600}h" if secs < 86400 else f"{secs // 86400}d"))
+        return f'<time data-epoch="{int(t)}" data-fmt="ago">{txt}</time>'
     py = {"full": "%Y-%m-%d %H:%M:%S %Z", "minute": "%Y-%m-%d %H:%M", "clock": "%H:%M:%S", "short": "%m-%d %H:%M", "hour": "%H:%M"}[fmt]
     return f'<time data-epoch="{int(t)}" data-fmt="{fmt}">{html.escape(tsz(t, py))}</time>'
 
@@ -817,6 +821,8 @@ TIPS = {
     "blocks24": "Blocks whose header time falls in the last 24 hours. Shares are block counts and carry a few points of statistical noise.",
     "share24": "This pool's blocks divided by all blocks in the last 24 hours.",
     "builder": "Read from the coinbase layout the DATUM gateway writes. DATUM pool: the unique-id push is 7 or more bytes, which the gateway writes only with a DATUM pool upstream, so the miner's own node built the block. Gateway, stratum v1: a 3-byte unique-id push, the gateway running standalone, so the node of whoever owns the payout address built the block. Other software: a coinbase this page does not recognize.",
+    "pool_share": "Share of the last 24 hours of blocks, by pool, from the coinbase payout address then tag. Block counts carry a few points of noise. The point of the ring is concentration: one pool at or above half the hashrate can rewrite recent history, so a single dominant slice is the reorg risk this page watches for.",
+    "recent_blocks": "Each card is one block: height, pool, transaction count, total reward, and how long ago it arrived. Colour is the pool, matching the share ring; a block from a pool outside the day's top seven is grey. Age counts up from the block's header time by your device clock.",
     "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
     "hourshare": "This pool's share of that hour's blocks. The three columns are the three largest pools of the day. Cells at or above half are marked.",
     "blocks_fork": "All blocks this label has mined since the BLAKE2b fork block.",
@@ -890,6 +896,91 @@ def stackable(page):
 
 def pool_group(name):
     return "Unknown" if name.startswith("Unknown") or name.startswith("unknown") else name
+
+
+CAT_VARS = [f"var(--cat-{i})" for i in range(1, 9)]
+
+
+def pool_slug(name):
+    out = "".join(c.lower() if c.isalnum() else "-" for c in name).strip("-")
+    while "--" in out:
+        out = out.replace("--", "-")
+    return "pool-" + (out or "x")
+
+
+def pool_colormap(ranked):
+    """Assign the validated categorical slots to the day's top pools, in fixed rank order.
+    Everyone past slot 7 shares the neutral 'other' colour, in both the donut and the block strip."""
+    m = {}
+    for i, (pool, _) in enumerate(ranked[:7]):
+        m[pool] = CAT_VARS[i]
+    return m
+
+
+def slot_of(pool, m):
+    return m.get(pool, "var(--cat-other)")
+
+
+def donut_svg(slices, total, notes=None):
+    """slices: list of (label, count, colour-var, slug-or-None). One ring, 2px surface gap; a slice
+    with a slug links to that pool's row. notes[label] is appended to the hover text."""
+    notes = notes or {}
+    E = html.escape
+    cx = cy = 100.0
+    r, ir = 86.0, 54.0
+    if total <= 0:
+        return '<p class="note">No blocks in the last 24 hours.</p>'
+    import math
+    parts, ang = [], -90.0
+    single = len(slices) == 1
+    for label, count, colour, slug in slices:
+        frac = count / total
+        sweep = 359.999 if single else frac * 360.0
+        a0, a1 = math.radians(ang), math.radians(ang + sweep)
+        xo0, yo0 = cx + r * math.cos(a0), cy + r * math.sin(a0)
+        xo1, yo1 = cx + r * math.cos(a1), cy + r * math.sin(a1)
+        xi1, yi1 = cx + ir * math.cos(a1), cy + ir * math.sin(a1)
+        xi0, yi0 = cx + ir * math.cos(a0), cy + ir * math.sin(a0)
+        large = 1 if sweep > 180 else 0
+        d = (f"M{xo0:.2f},{yo0:.2f} A{r:.0f},{r:.0f} 0 {large} 1 {xo1:.2f},{yo1:.2f} "
+             f"L{xi1:.2f},{yi1:.2f} A{ir:.0f},{ir:.0f} 0 {large} 0 {xi0:.2f},{yi0:.2f} Z")
+        seg = (f'<path d="{d}" fill="{colour}" stroke="var(--card)" stroke-width="2" stroke-linejoin="round">'
+               f'<title>{E(label)}: {count} blocks ({100 * frac:.1f}%)'
+               + (E(" · " + notes[label]) if notes.get(label) else "") + '</title></path>')
+        parts.append(f'<a href="#{slug}">{seg}</a>' if slug else seg)
+        ang += sweep
+    centre = (f'<text x="{cx:.0f}" y="{cy - 3:.0f}" text-anchor="middle" class="donut-num">{total}</text>'
+              f'<text x="{cx:.0f}" y="{cy + 15:.0f}" text-anchor="middle" class="donut-sub">blocks &#183; 24h</text>')
+    return (f'<svg viewBox="0 0 200 200" class="donut" role="img" '
+            f'aria-label="Share of the last 24 hours of blocks by pool">{"".join(parts)}{centre}</svg>')
+
+
+def donut_legend(slices, total):
+    E = html.escape
+    li = []
+    for label, count, colour, slug in slices:
+        name = f'<a class="lnk" href="#{slug}">{E(label)}</a>' if slug else f'<span class="ln">{E(label)}</span>'
+        li.append(f'<li><span class="sw" style="background:{colour}"></span>{name}'
+                  f'<span class="lv">{count} &#183; {100 * count / total:.0f}%</span></li>')
+    return f'<ul class="legend">{"".join(li)}</ul>'
+
+
+def blocks_strip(latest, m):
+    E = html.escape
+    cards = []
+    for c in latest:
+        grp = pool_group(c["label"])
+        colour = slot_of(grp, m)
+        reward = sum(v for _, v in c["outs"].values()) / 1e8
+        cards.append(
+            f'<div class="blk"><div class="blk-top" style="background:{colour}"></div>'
+            f'<div class="blk-h">{c["h"]}</div>'
+            f'<div class="blk-pool" title="{E(c["label"])}">{E(c["label"])}</div>'
+            f'<div class="blk-m">{c.get("ntx", "?")} tx</div>'
+            f'<div class="blk-m">{reward:.3f} BTC</div>'
+            f'<div class="blk-age">{tt(c["t"], "ago")}</div></div>')
+    return f'<div class="blocks">{"".join(cards)}</div>' if cards else '<p class="note">No blocks yet.</p>'
+
 
 
 def render_html(path, sd, st):
@@ -969,7 +1060,7 @@ def render_html(path, sd, st):
         out = []
         for n, k in ranked[:15]:
             label = f"Unknown ({len(unknown_addrs)} payout address{'es' if len(unknown_addrs) != 1 else ''})" if n == "Unknown" else n
-            out.append(f"<tr><td>{E(label)}</td><td class=n>{k}</td><td class=n>{100 * k / total:.1f}%</td><td>{builder_mix(n)}</td></tr>")
+            out.append(f'<tr id="{pool_slug(n)}" class="prow"><td>{E(label)}</td><td class=n>{k}</td><td class=n>{100 * k / total:.1f}%</td><td>{builder_mix(n)}</td></tr>')
         rest_n = sum(k for _, k in ranked[15:])
         if rest_n:
             out.append(f"<tr><td>{len(ranked) - 15} others</td><td class=n>{rest_n}</td><td class=n>{100 * rest_n / total:.1f}%</td><td></td></tr>")
@@ -1004,6 +1095,27 @@ def render_html(path, sd, st):
         return "\n".join(out) or "<tr><td colspan=3 class=note>none yet</td></tr>"
 
     hour_heads = "".join(f"<th class=n>{E(c)}</th>" for c in cols)
+
+    colormap = pool_colormap(ranked)
+    donut_slices = [(n, k, CAT_VARS[i], pool_slug(n)) for i, (n, k) in enumerate(ranked[:7])]
+    rest = sum(k for _, k in ranked[7:])
+    if rest:
+        donut_slices.append(("Other", rest, "var(--cat-other)", None))
+    day_cls = {}
+    for h, b in day_h.items():
+        c = cls_by_h.get(h)
+        if c:
+            day_cls.setdefault(pool_group(b["pool"]), {})[c] = day_cls.setdefault(pool_group(b["pool"]), {}).get(c, 0) + 1
+    donut_notes = {g: CLASS_NAMES[max(cc, key=cc.get)] for g, cc in day_cls.items() if cc}
+    donut_html = donut_svg(donut_slices, len(day), donut_notes)
+    legend_html = donut_legend(donut_slices, len(day)) if day else ""
+    strip_html = ""
+    if os.path.exists(os.path.join(sd, "rewards.json")):
+        latest_cb = sorted(Rewards(sd).d["coinbases"].values(), key=lambda c: -c["h"])[:16]
+        strip_html = blocks_strip(latest_cb, colormap)
+    win = len(st.get("chain", {}))
+    wtimes = [b["time"] for b in st.get("blocks", {}).values() if b.get("time")]
+    wspan = round((max(wtimes) - min(wtimes)) / 3600) if len(wtimes) > 1 else 0
 
     rw_path = os.path.join(sd, "rewards.json")
     reward_rows, move_rows, wallet_rows, block_rows, overlap_text, rw_note = "", "", "", "", "", ""
@@ -1080,11 +1192,15 @@ def render_html(path, sd, st):
   --ink: #171717; --paper: #f6f3ee; --card: #ffffff; --rule: #dcd5c8; --mute: #6b675f;
   --orange: #f7931a; --orange-tint: rgba(247, 147, 26, .26); --green: #2d4b25; --band: #2d4b25; --band-ink: #ffffff; --band-sub: #d9e3d3;
   --link: #2d4b25; --ok: #2e7d32; --warn: #a86400; --bad: #c62828;
+  --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a; --cat-4: #eda100;
+  --cat-5: #e87ba4; --cat-6: #008300; --cat-7: #4a3aa7; --cat-other: #b4ada0;
 }}
 @media (prefers-color-scheme: dark) {{ :root {{
   --ink: #f2f2f2; --paper: #171717; --card: #222222; --rule: #3a3a3a; --mute: #a09a90;
   --orange-tint: rgba(247, 147, 26, .22); --green: #9ccc65; --band: #1f3519; --band-ink: #f2f2f2; --band-sub: #b7c7ad;
   --link: #9ccc65; --ok: #8bc34a; --warn: #ffb74d; --bad: #ff6b60;
+  --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500;
+  --cat-5: #d55181; --cat-6: #008300; --cat-7: #9085e9; --cat-other: #6b675f;
 }} }}
 * {{ box-sizing: border-box; }}
 body {{ margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 Manjari, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
@@ -1125,6 +1241,29 @@ td [data-tip] {{ border-bottom: 1px dotted var(--rule); }}
 [data-tip]:hover::after, [data-tip]:focus::after {{ content: attr(data-tip); position: absolute; left: 0; top: calc(100% + .35rem); z-index: 9; width: 20rem; max-width: 80vw; white-space: normal; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .85rem; line-height: 1.45; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .5rem .7rem; box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }}
 th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hover::after, td.n [data-tip]:focus::after {{ left: auto; right: 0; }}
 .how li {{ margin: .3rem 0; }}
+.donutwrap {{ display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; align-items: center; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 1rem; }}
+.donutfig {{ margin: 0; }}
+.donut {{ width: 200px; height: 200px; display: block; }}
+.donut-num {{ fill: var(--ink); font: 700 2rem/1 "Martel Sans", Georgia, serif; }}
+.donut-sub {{ fill: var(--mute); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }}
+.legend {{ list-style: none; margin: 0; padding: 0; flex: 1 1 16rem; display: grid; grid-template-columns: 1fr 1fr; gap: .25rem 1.4rem; }}
+.legend li {{ display: flex; align-items: center; gap: .45rem; font-size: .9rem; min-width: 0; }}
+.legend .sw {{ width: .8rem; height: .8rem; border-radius: 2px; flex: none; }}
+.legend .ln {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.legend .lv {{ color: var(--mute); margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }}
+.legend a.lnk {{ color: inherit; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.legend a.lnk:hover {{ text-decoration: underline; }}
+.donut a {{ cursor: pointer; }}
+.prow {{ scroll-margin-top: 1rem; transition: background .3s; }}
+.prow:target {{ background: var(--orange-tint); }}
+.blocks {{ display: flex; flex-wrap: wrap; gap: .5rem; }}
+.blk {{ width: 98px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); overflow: hidden; }}
+.blk-top {{ height: 6px; }}
+.blk-h {{ font: 700 1rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; padding: .3rem .45rem 0; }}
+.blk-pool {{ font-size: .78rem; padding: .1rem .45rem 0; color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.blk-m {{ font-size: .75rem; padding: 0 .45rem; color: var(--mute); font-variant-numeric: tabular-nums; }}
+.blk-age {{ font-size: .72rem; padding: .1rem .45rem .4rem; color: var(--mute); }}
+@media (max-width: 520px) {{ .legend {{ grid-template-columns: 1fr; }} .blk {{ width: calc(50% - .25rem); }} }}
 @media (max-width: 960px) {{
   table.wide, table.wide tbody, table.wide tr, table.wide td {{ display: block; width: 100%; }}
   table.wide tr.head {{ display: none; }}
@@ -1163,6 +1302,14 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <div class="card"><div class="k">{tipped("Last alert", TIPS["last_alert"])}</div><div class="v">{last_alert}</div></div>
 <div class="card"><div class="k">{tipped("Tip", TIPS["tip"])}</div><div class="v">{tip_h}<br>{tip_html}</div></div>
 </div>
+
+<h2>Pool share, last 24 hours</h2>
+<p class="note">{tipped("Who is finding the blocks.", TIPS["pool_share"])} A pool near half the ring is the one that could reorganize the chain on its own. Click a slice or a legend entry to jump to that pool's row below.</p>
+<div class="donutwrap"><figure class="donutfig">{donut_html}</figure>{legend_html}</div>
+
+<h2>Recent blocks</h2>
+<p class="note">{tipped("The most recent blocks, newest first.", TIPS["recent_blocks"])} Colour marks the pool; grey is any pool outside the day's top seven.</p>
+{strip_html}
 
 <h2>Blocks by pool, last 24 hours</h2>
 <p class="note">{len(day)} blocks. Pools are named from the coinbase payout address, then the coinbase tag, using <a href="{POOLS_REPO}">Kilombino's pool list</a>. Both are chosen by the miner, so treat names as claims. Shares are block counts and carry a few points of noise.</p>
@@ -1226,11 +1373,39 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <li><strong>Alerts.</strong> {E(TIPS["last_alert"])}</li>
 </ul>
 </main>
-<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. One node's view, cross-checked once a minute against {ex_link}, whose explorer also has the block-by-block detail. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Window {len(st.get('chain', {}))} heights.</footer>
+<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. One node's view, cross-checked once a minute against {ex_link}, whose explorer also has the block-by-block detail. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.</footer>
 <script>
 (function () {{
   var gen = 1000 * parseInt(document.querySelector('.sub time[data-epoch]').getAttribute('data-epoch'), 10);
-  if (!isNaN(gen) && Date.now() - gen > 15 * 60 * 1000) document.getElementById('stale').style.display = 'block';
+  var box = document.getElementById('stale');
+  var show = function (msg) {{ box.textContent = msg; box.style.display = 'block'; }};
+  // Fallback only when the origin is unreachable: judge by the device clock, which may be wrong.
+  var deviceCheck = function () {{
+    var mins = Math.round((Date.now() - gen) / 60000);
+    if (!isNaN(mins) && mins > 20) show('This copy is about ' + mins + ' minutes old by your device clock. If the clock is right, the page stopped updating.');
+    else box.style.display = 'none';
+  }};
+  // Authoritative check: ask the origin its time and how old the current page is. Device clock not used.
+  var serverCheck = function () {{
+    if (typeof fetch !== 'function') {{ deviceCheck(); return; }}
+    var req;
+    try {{ req = fetch(location.pathname + '?_=' + Date.now(), {{ cache: 'no-store' }}); }}
+    catch (e) {{ deviceCheck(); return; }}
+    req.then(function (r) {{
+      var serverNow = Date.parse(r.headers.get('date'));
+      return r.text().then(function (html) {{
+        var m = html.match(/class="sub"[\\s\\S]*?data-epoch="(\\d+)"/);
+        var live = m ? 1000 * parseInt(m[1], 10) : NaN;
+        if (!isNaN(serverNow) && !isNaN(live) && serverNow - live > 15 * 60000)
+          show('The page has not regenerated for ' + Math.round((serverNow - live) / 60000) + ' minutes. The generator or upload has stopped.');
+        else if (!isNaN(live) && live - gen > 5 * 60000)
+          show('You are viewing a cached copy from ' + Math.round((live - gen) / 60000) + ' minutes ago. Reload for the current page.');
+        else box.style.display = 'none';
+      }});
+    }}).catch(deviceCheck);
+  }};
+  serverCheck();
+  setInterval(serverCheck, 300000);
   // Re-render every timestamp in the viewer's own time zone; the server text stays as the fallback.
   var pad = function (n) {{ return (n < 10 ? '0' : '') + n; }};
   var zone = '';
@@ -1249,6 +1424,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
     else if (f === 'clock') out = h + ':' + m + ':' + s;
     else if (f === 'short') out = M + '-' + D + ' ' + h + ':' + m;
     else if (f === 'hour') out = h + ':' + m;
+    else if (f === 'ago') {{ var a = Math.max(0, Math.floor(Date.now() / 1000) - parseInt(el.getAttribute('data-epoch'), 10)); out = a < 60 ? a + 's' : (a < 3600 ? Math.floor(a / 60) + 'm' : (a < 86400 ? Math.floor(a / 3600) + 'h' : Math.floor(a / 86400) + 'd')); }}
     if (out) el.textContent = out;
   }}
   if (zone) {{ var zs = document.querySelectorAll('.tzname'); for (var k = 0; k < zs.length; k++) zs[k].textContent = zone; }}
