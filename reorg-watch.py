@@ -821,7 +821,7 @@ TIPS = {
     "blocks24": "Blocks whose header time falls in the last 24 hours. Shares are block counts and carry a few points of statistical noise.",
     "share24": "This pool's blocks divided by all blocks in the last 24 hours.",
     "builder": "Read from the coinbase layout the DATUM gateway writes. DATUM pool: the unique-id push is 7 or more bytes, which the gateway writes only with a DATUM pool upstream, so the miner's own node built the block. Gateway, stratum v1: a 3-byte unique-id push, the gateway running standalone, so the node of whoever owns the payout address built the block. Other software: a coinbase this page does not recognize.",
-    "pool_share": "Share of the last 24 hours of blocks, by pool, from the coinbase payout address then tag. Block counts carry a few points of noise. The point of the ring is concentration: one pool at or above half the hashrate can rewrite recent history, so a single dominant slice is the reorg risk this page watches for.",
+    "pool_share": "Share of a recent window of blocks, by pool (choose the window with the selector), from the coinbase payout address then tag. Block counts carry a few points of noise. The point of the ring is concentration: one pool at or above half the hashrate can rewrite recent history, so a single dominant slice is the reorg risk this page watches for.",
     "recent_blocks": "Each card is one block: height, pool, transaction count, total reward, and how long ago it arrived. Colour is the pool, matching the share ring; a block from a pool outside the day's top seven is grey. Age counts up from the block's header time by your device clock.",
     "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
     "hourshare": "This pool's share of that hour's blocks. The three columns are the three largest pools of the day. Cells at or above half are marked.",
@@ -1096,19 +1096,42 @@ def render_html(path, sd, st):
 
     hour_heads = "".join(f"<th class=n>{E(c)}</th>" for c in cols)
 
+    # One colour map, from the 24 h ranking, reused for every window so a pool keeps its colour
+    # whichever range is selected (a filter must never repaint the survivors).
     colormap = pool_colormap(ranked)
-    donut_slices = [(n, k, CAT_VARS[i], pool_slug(n)) for i, (n, k) in enumerate(ranked[:7])]
-    rest = sum(k for _, k in ranked[7:])
-    if rest:
-        donut_slices.append(("Other", rest, "var(--cat-other)", None))
     day_cls = {}
     for h, b in day_h.items():
         c = cls_by_h.get(h)
         if c:
-            day_cls.setdefault(pool_group(b["pool"]), {})[c] = day_cls.setdefault(pool_group(b["pool"]), {}).get(c, 0) + 1
+            g = pool_group(b["pool"])
+            day_cls.setdefault(g, {})[c] = day_cls.setdefault(g, {}).get(c, 0) + 1
     donut_notes = {g: CLASS_NAMES[max(cc, key=cc.get)] for g, cc in day_cls.items() if cc}
-    donut_html = donut_svg(donut_slices, len(day), donut_notes)
-    legend_html = donut_legend(donut_slices, len(day)) if day else ""
+
+    RANGES = [1, 3, 6, 12, 24]
+    DEFAULT_RANGE = 1
+    panes = []
+    for winh in RANGES:
+        sel = [b for b in day if now - b["time"] <= winh * 3600]
+        cnt = {}
+        for b in sel:
+            g = pool_group(b["pool"])
+            cnt[g] = cnt.get(g, 0) + 1
+        ranked_w = sorted(cnt.items(), key=lambda kv: -kv[1])
+        slices = [(g, k, colormap[g], pool_slug(g)) for g, k in ranked_w if g in colormap]
+        other = sum(k for g, k in ranked_w if g not in colormap)
+        if other:
+            slices.append(("Other", other, "var(--cat-other)", None))
+        total = len(sel)
+        if total:
+            fig = donut_svg(slices, total, donut_notes)
+            leg = donut_legend(slices, total)
+            pane = f'<figure class="donutfig">{fig}</figure>{leg}'
+        else:
+            pane = '<p class="note">No blocks in this window.</p>'
+        hid = "" if winh == DEFAULT_RANGE else " hidden"
+        panes.append(f'<div class="donutpane" data-range="{winh}"{hid}>{pane}</div>')
+    range_opts = "".join(f'<option value="{h}"{" selected" if h == DEFAULT_RANGE else ""}>{h} hour{"s" if h != 1 else ""}</option>' for h in RANGES)
+    donut_panes = "".join(panes)
     strip_html = ""
     if os.path.exists(os.path.join(sd, "rewards.json")):
         latest_cb = sorted(Rewards(sd).d["coinbases"].values(), key=lambda c: -c["h"])[:16]
@@ -1241,7 +1264,11 @@ td [data-tip] {{ border-bottom: 1px dotted var(--rule); }}
 [data-tip]:hover::after, [data-tip]:focus::after {{ content: attr(data-tip); position: absolute; left: 0; top: calc(100% + .35rem); z-index: 9; width: 20rem; max-width: 80vw; white-space: normal; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .85rem; line-height: 1.45; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .5rem .7rem; box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }}
 th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hover::after, td.n [data-tip]:focus::after {{ left: auto; right: 0; }}
 .how li {{ margin: .3rem 0; }}
-.donutwrap {{ display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; align-items: center; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 1rem; }}
+.donutwrap {{ background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 1rem; }}
+.donutpane {{ display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; align-items: center; }}
+.donutpane[hidden] {{ display: none; }}
+.rangebar {{ display: flex; align-items: center; gap: .5rem; margin: 0 0 .6rem; font-size: .9rem; color: var(--mute); }}
+.rangebar select {{ font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 5px; padding: .2rem .4rem; }}
 .donutfig {{ margin: 0; }}
 .donut {{ width: 200px; height: 200px; display: block; }}
 .donut-num {{ fill: var(--ink); font: 700 2rem/1 "Martel Sans", Georgia, serif; }}
@@ -1303,9 +1330,10 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <div class="card"><div class="k">{tipped("Tip", TIPS["tip"])}</div><div class="v">{tip_h}<br>{tip_html}</div></div>
 </div>
 
-<h2>Pool share, last 24 hours</h2>
+<h2>Pool share, <span id="rangelabel">last 1 hour</span></h2>
 <p class="note">{tipped("Who is finding the blocks.", TIPS["pool_share"])} A pool near half the ring is the one that could reorganize the chain on its own. Click a slice or a legend entry to jump to that pool's row below.</p>
-<div class="donutwrap"><figure class="donutfig">{donut_html}</figure>{legend_html}</div>
+<div class="rangebar"><label for="rangesel">Window</label> <select id="rangesel">{range_opts}</select></div>
+<div class="donutwrap">{donut_panes}</div>
 
 <h2>Recent blocks</h2>
 <p class="note">{tipped("The most recent blocks, newest first.", TIPS["recent_blocks"])} Colour marks the pool; grey is any pool outside the day's top seven.</p>
@@ -1428,6 +1456,19 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
     if (out) el.textContent = out;
   }}
   if (zone) {{ var zs = document.querySelectorAll('.tzname'); for (var k = 0; k < zs.length; k++) zs[k].textContent = zone; }}
+  var rsel = document.getElementById('rangesel');
+  if (rsel) {{
+    try {{ var saved = localStorage.getItem('reorgwatch-range'); if (saved) rsel.value = saved; }} catch (e) {{}}
+    var applyRange = function () {{
+      var v = rsel.value, panes = document.querySelectorAll('.donutpane');
+      for (var i = 0; i < panes.length; i++) panes[i].hidden = panes[i].getAttribute('data-range') !== v;
+      var lbl = document.getElementById('rangelabel');
+      if (lbl) lbl.textContent = 'last ' + v + (v === '1' ? ' hour' : ' hours');
+      try {{ localStorage.setItem('reorgwatch-range', v); }} catch (e) {{}}
+    }};
+    rsel.addEventListener('change', applyRange);
+    applyRange();
+  }}
 }})();
 </script>
 </body>
