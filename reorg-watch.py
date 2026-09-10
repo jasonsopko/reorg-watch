@@ -200,15 +200,22 @@ class Pools:
             self.tags.sort(key=lambda x: -len(x[0]))
 
     def identify(self, addrs, tag):
-        by_tag = next((n for t, n in self.tags if t in tag), None)
-        for a in addrs:
-            if a in self.by_addr:
-                n = self.by_addr[a]
-                # Kilombino autotags address-only solo miners as "Solo <prefix>";
-                # a real pool tag on the same block is the better name.
-                if n.startswith("Solo ") and by_tag:
-                    return by_tag
+        hits = [n for t, n in self.tags if t in tag]  # longest tag first
+        paid = [self.by_addr[a] for a in addrs if a in self.by_addr]
+        # A pool that signs the coinbase and is paid in it built the block.
+        # Lazarus pays its miners in the coinbase, so a listed solo miner is
+        # often the first payout there; the tag plus the pool's own output
+        # outrank a payee.
+        for n in hits:
+            if n in paid:
                 return n
+        by_tag = hits[0] if hits else None
+        for n in paid:
+            # Kilombino autotags address-only solo miners as "Solo <prefix>";
+            # a real pool tag on the same block is the better name.
+            if n.startswith("Solo ") and by_tag:
+                return by_tag
+            return n
         if by_tag:
             return by_tag
         return "Unknown (" + (addrs[0][:12] if addrs else "no address") + ")"
@@ -461,14 +468,14 @@ def named(label):
 class Rewards:
     def __init__(self, sd):
         self.path = os.path.join(sd, "rewards.json")
-        self.d = {"version": 6, "scanned_to": None, "coinbases": {}, "spends": [], "overlaps": []}
+        self.d = {"version": 7, "scanned_to": None, "coinbases": {}, "spends": [], "overlaps": []}
         if os.path.exists(self.path):
             with open(self.path) as f:
                 old = json.load(f)
-            if old.get("version", 1) >= 6:
+            if old.get("version", 1) >= 7:
                 self.d = old
             else:
-                print(f"{ts()} reward index format changed; rebuilding", flush=True)
+                print(f"{ts()} reward index format or attribution rule changed; rebuilding", flush=True)
         self.dropped = set()  # spend txids removed by a rollback this run; not re-announced
 
     def save(self):
@@ -817,7 +824,7 @@ TIPS = {
     "reorgs": "A reorg is counted when the active chain's hash at an already-seen height changes. Depth is the number of blocks replaced. Depth 1 is an ordinary tie between two blocks found seconds apart; depth 2 or more is an alert.",
     "last_alert": "Most recent event that was emailed: a reorg of depth 2 or more, an explorer disagreement, a node that fell behind, a node outage, or two substantial pool names found sharing one wallet.",
     "tip": "Height and hash of the node's best block at the time this page was generated.",
-    "pool": "Named from the coinbase payout address in Kilombino's pool list first, then from the coinbase tag. Both are chosen by the miner, so a name is a claim, not proof.",
+    "pool": "A pool named in the coinbase tag and paid in the coinbase wins; otherwise the first payout address in Kilombino's pool list, then the tag. Both are chosen by the miner, so a name is a claim, not proof.",
     "blocks24": "Blocks whose header time falls in the last 24 hours. Shares are block counts and carry a few points of statistical noise.",
     "share24": "This pool's blocks divided by all blocks in the last 24 hours.",
     "builder": "Read from the coinbase layout the DATUM gateway writes. DATUM pool: the unique-id push is 7 or more bytes, which the gateway writes only with a DATUM pool upstream, so the miner's own node built the block. Gateway, stratum v1: a 3-byte unique-id push, the gateway running standalone, so the node of whoever owns the payout address built the block. Other software: a coinbase this page does not recognize.",
@@ -1558,6 +1565,7 @@ def main():
     ap.add_argument("--floor", type=int, default=DEFAULT_FLOOR)
     ap.add_argument("--html", default="")
     ap.add_argument("--no-rewards", action="store_true")
+    ap.add_argument("--reattribute", action="store_true", help="re-run pool attribution for every block in the window")
     ap.add_argument("--tz", default="UTC", help="time zone for the status page, e.g. America/New_York")
     ap.add_argument("--sweep-btc", type=float, default=10.0)
     ap.add_argument("--verbose", action="store_true")
@@ -1617,6 +1625,14 @@ def main():
         finish(sd, args, st, state_path, events)
         print(f"{ts()} seeded window {min(int(k) for k in st['chain'])}-{st['tip_height']} tip {short(st['tip_hash'])}")
         return 0
+
+    if args.reattribute:
+        changed = 0
+        for k, hsh in st["chain"].items():
+            was = st["blocks"].get(k, {}).get("pool")
+            remember(st, describe_block(rest, pools, int(k), hsh))
+            changed += st["blocks"][k]["pool"] != was
+        print(f"{ts()} re-attributed {len(st['chain'])} blocks, {changed} renamed")
 
     chain = {int(k): v for k, v in st["chain"].items()}
     last_tip = st["tip_height"]
@@ -1699,7 +1715,7 @@ def finish(sd, args, st, state_path, events):
         with open(md_path, "w") as f:
             f.write("# Reorg log\n\nChain reorganizations and explorer disagreements seen by a Bitcoin Knots node "
                     "on the BLAKE2b chain. Depth-1 events are ordinary ties. Pools are identified by coinbase "
-                    "payout address, then coinbase tag.\n\n")
+                    "tag plus payout address, then payout address, then tag.\n\n")
     alerts = []
     with open(os.path.join(sd, "events.jsonl"), "a") as ev, open(md_path, "a") as md:
         for e in events:

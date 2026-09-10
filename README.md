@@ -28,10 +28,14 @@ Once a minute, from the node's REST interface:
 | node behind explorer | ALERT | The explorer is three or more blocks ahead for three consecutive checks. Partition, stall, or eclipse. |
 | node unreachable | ALERT | REST did not answer for three consecutive runs. |
 
-Pool attribution uses the coinbase payout address first, then the coinbase
-tag, matched against Kilombino's `pools-v2.json`, the list mempool.guide and
-mempool.kilombino.com use. Tags are self-declared. Treat names as claims,
-not proof.
+Pool attribution matches the coinbase tag and payout addresses against
+Kilombino's `pools-v2.json`, the list mempool.guide and mempool.kilombino.com
+use. A pool named in the tag and paid in the coinbase wins. Otherwise the
+first listed payout address names the block, then the tag. The first rule
+matters for pools that pay their miners in the coinbase: a listed solo miner
+is often the first output of a Lazarus block. `--reattribute` re-runs the
+rule over the stored window after a list or rule change. Tags are
+self-declared. Treat names as claims, not proof.
 
 ## Reward flow
 
