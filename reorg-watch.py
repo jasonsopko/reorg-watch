@@ -990,6 +990,233 @@ def blocks_strip(latest, m):
 
 
 
+STATUS_COLOR = {"active": "#5fbf2f", "valid-fork": "#2fb6c8", "valid-headers": "#d76aa6",
+                "headers-only": "#d8912a", "invalid": "#cc4444"}
+
+
+def fork_dag(branches, active, colormap, peers_at_tip, E, recent, keep=4):
+    """The block tree. The kept chain runs along the top and carries on to the tip; a branch
+    that lost sits below the height it contested and dead-ends there. Long uncontested runs
+    collapse so the interesting parts sit together, and the most recent blocks are drawn
+    one by one, which is where a new fork would appear."""
+    first_recent = recent[0][0] if recent else (active["height"] + 1)
+    stale_at = {}
+    historical = []
+    for br in branches:
+        # A branch goes in the live tail only if it fits entirely inside it. One that
+        # straddles the boundary is drawn on the historical side, which already knows how
+        # to lay a multi-block branch out as a chain.
+        if br["lost"] and all(b["height"] >= first_recent for b in br["lost"]):
+            n = len(br["lost"])
+            for i, blk in enumerate(br["lost"]):
+                stale_at[blk["height"]] = (blk, br["status"] if i == n - 1 else None,
+                                           i == 0, i == n - 1)
+        else:
+            historical.append(br)
+
+    cols, prev_h = [], None
+    for br in list(reversed(historical[:keep])):
+        start = br["forked_at"] + 1
+        if prev_h is not None and start - prev_h - 1 > 0:
+            cols.append({"kind": "gap", "n": start - prev_h - 1})
+        span = range(start, br["tip_height"] + 1)
+        for i, h in enumerate(span):
+            cols.append({"kind": "blocks", "height": h,
+                         "kept": br["won"][i] if i < len(br["won"]) else None,
+                         "stale": br["lost"][i] if i < len(br["lost"]) else None,
+                         # a branch deeper than one block is a chain of its own: only its
+                         # oldest block hangs off the main chain, only its tip dead-ends
+                         "stale_root": i == 0,
+                         "stale_tip": i == len(span) - 1,
+                         "status": br["status"] if i == len(span) - 1 else None})
+        prev_h = br["tip_height"]
+    if recent:
+        if prev_h is not None and first_recent - prev_h - 1 > 0:
+            cols.append({"kind": "gap", "n": first_recent - prev_h - 1})
+        for i, (h, pool, hsh) in enumerate(recent):
+            st_blk, st_status, st_root, st_tip = stale_at.get(h, (None, None, True, True))
+            cols.append({"kind": "blocks", "height": h,
+                         "kept": {"pool": pool, "height": h, "hash": hsh},
+                         "stale": st_blk, "status": st_status,
+                         "stale_root": st_root, "stale_tip": st_tip,
+                         "active": i == len(recent) - 1})
+
+    cols.reverse()   # newest on the left: a new block appears there and pushes history right
+
+    BW, BH, D, PAD = 112, 62, 12, 34
+    GAPW, LEFT, TOPY = 190, 108, 46
+    ROW2 = TOPY + BH + D + 66
+    xs, x = [], LEFT
+    for c in cols:
+        xs.append(x)
+        x += (GAPW if c["kind"] == "gap" else BW + D + PAD)
+    W, H = x + 46, ROW2 + BH + 52
+
+    def box(bx, by, blk, badge=None, dead=False):
+        fill = slot_of(pool_group(blk["pool"]), colormap)
+        op = ' opacity=".62"' if dead else ""
+        dash = ' stroke-dasharray="5 4"' if dead else ""
+        g = (f'<g{op}>'
+             f'<polygon points="{bx},{by} {bx+D},{by-D} {bx+BW+D},{by-D} {bx+BW},{by}" fill="{fill}"/>'
+             f'<polygon points="{bx},{by} {bx+D},{by-D} {bx+BW+D},{by-D} {bx+BW},{by}" fill="#000" opacity=".18"/>'
+             f'<polygon points="{bx+BW},{by} {bx+BW+D},{by-D} {bx+BW+D},{by+BH-D} {bx+BW},{by+BH}" fill="{fill}"/>'
+             f'<polygon points="{bx+BW},{by} {bx+BW+D},{by-D} {bx+BW+D},{by+BH-D} {bx+BW},{by+BH}" fill="#000" opacity=".34"/>'
+             f'<rect x="{bx}" y="{by}" width="{BW}" height="{BH}" fill="{fill}" '
+             f'stroke="var(--card)" stroke-width="2"{dash}/>'
+             f'<title>{E(blk["pool"])} at {blk["height"]}\n{E(blk.get("hash",""))}</title>'
+             f'<text x="{bx+BW/2}" y="{by+BH/2+7}" class="fh" text-anchor="middle">{blk["height"]}</text>'
+             f'</g>'
+             f'<text x="{bx+BW/2}" y="{by+BH+20}" class="fp" text-anchor="middle">{E(blk["pool"][:17])}</text>')
+        if dead:
+            # the branch stops here: a stub running the way the chain grows, ending in a cross
+            sx, sy = bx - 4, by + BH / 2
+            g += (f'<line x1="{sx}" y1="{sy}" x2="{sx-16}" y2="{sy}" class="fedge fdead"/>'
+                  f'<line x1="{sx-16}" y1="{sy-6}" x2="{sx-28}" y2="{sy+6}" class="fx"/>'
+                  f'<line x1="{sx-28}" y1="{sy-6}" x2="{sx-16}" y2="{sy+6}" class="fx"/>')
+        if badge:
+            c = STATUS_COLOR.get(badge, "#888")
+            g = (f'<rect x="{bx}" y="{by-D-22}" width="{max(64, int(8.4*len(badge)))}" height="18" '
+                 f'rx="3" fill="{c}"/>'
+                 f'<text x="{bx+6}" y="{by-D-7}" class="fb">{E(badge)}</text>') + g
+        return g
+
+    parts = []
+    for i, c in enumerate(cols):
+        bx = xs[i]
+        # the parent of any column is the OLDER one, which now sits to its right
+        par = cols[i+1] if i + 1 < len(cols) else None
+        px = xs[i+1] if par is not None else None
+        if c["kind"] == "gap":
+            y = TOPY + BH / 2
+            parts.append(f'<line x1="{bx}" y1="{y}" x2="{bx+GAPW}" y2="{y}" class="fedge fdash"/>'
+                         f'<text x="{bx+GAPW/2}" y="{y-12}" class="fg" text-anchor="middle">'
+                         f'{c["n"]} block{"s" if c["n"] != 1 else ""} hidden</text>')
+            continue
+        right = bx + BW + D
+        if par is None:
+            # history carries on past the right edge
+            parts.append(f'<line x1="{right}" y1="{TOPY+BH/2}" x2="{right+26}" y2="{TOPY+BH/2}" '
+                         f'class="fedge fdash"/>')
+        elif par["kind"] == "blocks":
+            parts.append(f'<line x1="{right}" y1="{TOPY+BH/2}" x2="{px}" y2="{TOPY+BH/2}" class="fedge"/>')
+        if c["kept"]:
+            parts.append(box(bx, TOPY, c["kept"], "active" if c.get("active") else None))
+        if c["stale"]:
+            if c.get("stale_root", True):
+                # oldest block of the losing branch: it hangs off the common ancestor above
+                anchor = (px if par is not None and par["kind"] == "blocks" else right + 26)
+                parts.append(f'<path d="M{anchor},{TOPY+BH/2} C{anchor-26},{TOPY+BH/2} '
+                             f'{right+26},{ROW2+BH/2} {right},{ROW2+BH/2}" class="fedge" fill="none"/>')
+            else:
+                # deeper in the branch: joins the older losing block to its right
+                parts.append(f'<line x1="{right}" y1="{ROW2+BH/2}" x2="{px}" y2="{ROW2+BH/2}" '
+                             f'class="fedge"/>')
+            parts.append(box(bx, ROW2, c["stale"], c["status"] if c.get("stale_tip", True) else None,
+                             dead=c.get("stale_tip", True)))
+    if peers_at_tip and cols:
+        tx = xs[0] + BW / 2
+        parts.append(f'<text x="{tx}" y="{TOPY+BH+40}" class="fg" text-anchor="middle">'
+                     f'{peers_at_tip} peers here</text>')
+    parts.append(f'<text x="4" y="{TOPY+BH/2+5}" class="fl">kept</text>'
+                 f'<text x="4" y="{ROW2+BH/2+5}" class="fl">stale</text>')
+    return (f'<div class="forkscroll"><svg class="forksvg" viewBox="0 0 {W} {H}" width="{W}" '
+            f'height="{H}" role="img" aria-label="block tree">{"".join(parts)}</svg></div>')
+
+
+def render_forks(sd, E, colormap, st):
+    """Branches the node knows but did not build on, the pool on each side, and the peers."""
+    try:
+        d = json.load(open(os.path.join(sd, "chain-tips.json")))
+    except Exception:
+        return ""
+    branches = d.get("branches", [])
+    peers = [p for p in d.get("peers", []) if not p.get("error")]
+    gen = E(d.get("generated", "unknown"))
+    active = d.get("active") or {}
+    tip = active.get("height")
+    fork_h = d.get("fork_height", 961640)
+
+    peer_html, at_tip = "", 0
+    if peers:
+        synced = [p.get("synced_headers") for p in peers if isinstance(p.get("synced_headers"), int)]
+        at_tip = sum(1 for h in synced if h == tip)
+        behind = sorted(h for h in synced if 0 <= h < tip)
+        stuck = [h for h in behind if h < fork_h]
+        unknown = len(peers) - len([h for h in synced if h >= 0])
+        bits = [f"<strong>{len(peers)}</strong> peers", f"<strong>{at_tip}</strong> at our tip"]
+        if behind:
+            bits.append(f"{len(behind)} behind (lowest {min(behind)})")
+        if unknown:
+            bits.append(f"{unknown} not yet synced")
+        stuck_note = ""
+        if stuck:
+            stuck_note = (f" <strong>{len(stuck)} of them sit below the fork block {fork_h}</strong>, "
+                          f"so they are on the old chain and cannot follow this one.")
+        peer_html = (f'<p class="note">{" &middot; ".join(bits)}. Heights are each peer’s own '
+                     f'header sync, read from this node.{stuck_note}</p>')
+
+    # what other nodes say: a crawl that asks peers directly for their headers
+    crawl_html = ""
+    try:
+        cw = json.load(open(os.path.join(sd, "peer-crawl.json")))
+    except Exception:
+        cw = None
+    if cw and cw.get("blake2b"):
+        div = cw.get("divergent") or []
+        if div:
+            worst = min(d.get("at_height", 0) for d in div)
+            crawl_html = (f'<p class="note bad"><strong>{len(div)} of {cw["blake2b"]} peers on '
+                          f'this chain report a different block</strong>, earliest at height '
+                          f'{worst}. That is a split, not a stale block: those nodes are '
+                          f'building on something this node does not have.</p>')
+        else:
+            crawl_html = (f'<p class="note"><strong>{cw["agree"]} of {cw["blake2b"]}</strong> peers '
+                          f'asked directly returned the same blocks we hold, up to height '
+                          f'{cw["our_tip"]}, and none reported a different one. Asked '
+                          f'{cw["asked"]} addresses, {cw["answered"]} answered, '
+                          f'{cw["answered"] - cw["blake2b"]} '
+                          f'{"was" if cw["answered"] - cw["blake2b"] == 1 else "were"} on the '
+                          f'legacy chain. '
+                          f'Checked {E(cw.get("generated", "?"))}.</p>')
+
+    # the live end of the chain, from the blocks this page already tracks
+    blocks = st.get("blocks", {})
+    chain = st.get("chain", {})
+    recent = []
+    if blocks:
+        top = max(int(k) for k in blocks)
+        for h in range(top - 5, top + 1):
+            b = blocks.get(str(h))
+            if b:
+                recent.append((h, b.get("pool", "unknown"), chain.get(str(h), "")))
+
+    if not branches and not recent:
+        return (f'<h2>Competing branches</h2>\n{peer_html}{crawl_html}<p class="note">No branch other '
+                f'than the one this node is building on has appeared since the fork block. '
+                f'Checked {gen}.</p>\n')
+
+    lost_by = {}
+    for br in branches:
+        for blk in br["lost"]:
+            lost_by[blk["pool"]] = lost_by.get(blk["pool"], 0) + 1
+    rows = "".join(f'<tr><td>{E(p)}</td><td class=n>{n}</td></tr>'
+                   for p, n in sorted(lost_by.items(), key=lambda kv: -kv[1])[:8])
+    legend = " ".join(f'<span class="fkey" style="background:{c}">{k}</span>'
+                      for k, c in STATUS_COLOR.items() if k != "headers-only")
+
+    return (f'<h2>Competing branches</h2>\n{peer_html}{crawl_html}'
+            f'<p class="note"><strong>{len(branches)}</strong> heights have been contested since the '
+            f'fork block: two miners solved the same height and this node kept one of them. Nearly all '
+            f'resolved in a single block and never became a reorg, which is why the reorg counters above '
+            f'read zero. The kept chain runs along the top and carries on; a branch that lost stops at '
+            f'the height it contested, marked with a cross. The right-hand end is the live chain, one '
+            f'box per block, so a new fork would appear there first. Checked {gen}.</p>'
+            f'<p class="note">{legend}</p>'
+            f'{fork_dag(branches, active, colormap, at_tip, E, recent)}'
+            f'<div class="wrap"><table class="stack">'
+            f'<tr><th>Pool whose block was discarded</th><th class=n>Times</th></tr>{rows}</table></div>\n')
+
+
 def render_survey(sd, E):
     """The endpoint survey section. Absent file renders nothing at all."""
     try:
@@ -1276,6 +1503,7 @@ def render_html(path, sd, st):
         rw_note = (f"{len(rw.d['coinbases'])} coinbases indexed since height {DEFAULT_FLOOR}, {len(rw.d['spends'])} transactions have spent one. "
                    "Moved means a coinbase output was spent: a payout to miners, a consolidation, or a transfer out. "
                    "The chain shows movement, not a sale. Held is mined minus moved and includes immature rewards.")
+    forks_html = render_forks(sd, E, colormap, st)
     survey_html = render_survey(sd, E)
     knot = ('<svg class="mark" viewBox="0 0 773 773" width="60" height="60" role="img" aria-label="Bitcoin Knots">'
             '<circle cx="386.5" cy="386.5" r="380" fill="#f7931a"/>'
@@ -1290,6 +1518,7 @@ def render_html(path, sd, st):
 <meta http-equiv="refresh" content="300">
 <title>Bitcoin Knots reorg watch</title>
 <style>
+html {{ font-size: 17.5px; }}
 :root {{
   color-scheme: light dark;
   --ink: #171717; --paper: #f6f3ee; --card: #ffffff; --rule: #dcd5c8; --mute: #6b675f;
@@ -1309,11 +1538,11 @@ def render_html(path, sd, st):
 body {{ margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 Manjari, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
 a {{ color: var(--link); text-decoration: none; }} a:hover {{ text-decoration: underline; }}
 header {{ border-bottom: 6px solid var(--orange); background: var(--band); color: var(--band-ink); }}
-.bar {{ max-width: 62rem; margin: 0 auto; padding: 1.4rem 1.25rem 1.1rem; display: flex; align-items: center; gap: 1rem; }}
+.bar {{ max-width: 88rem; margin: 0 auto; padding: 1.4rem 1.25rem 1.1rem; display: flex; align-items: center; gap: 1rem; }}
 .mark {{ flex: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }}
 h1 {{ margin: 0; font: 700 1.55rem/1.15 "Martel Sans", Georgia, "Times New Roman", serif; letter-spacing: -.01em; }}
 .sub {{ margin: .2rem 0 0; color: var(--band-sub); font-size: .95rem; }}
-main {{ max-width: 62rem; margin: 0 auto; padding: 0 1.25rem 3rem; }}
+main {{ max-width: 88rem; margin: 0 auto; padding: 0 1.25rem 3rem; }}
 h2 {{ font: 700 1.1rem/1.2 "Martel Sans", Georgia, "Times New Roman", serif; color: var(--green); margin: 2rem 0 .6rem; padding-bottom: .35rem; border-bottom: 2px solid var(--orange); }}
 .note, .muted {{ color: var(--mute); }} .note {{ font-size: .95rem; margin: 0 0 .7rem; }}
 .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; margin-top: 1.2rem; }}
@@ -1393,6 +1622,19 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
   table.hours {{ font-size: .85rem; }}
   [data-tip]:hover::after, [data-tip]:focus::after {{ left: 0; right: auto; }}
 }}
+.forkscroll{{overflow-x:auto;padding:4px 0 2px}}
+.forksvg{{height:auto;display:block}}
+.forksvg .fh{{font:700 16px system-ui;fill:#fff}}
+.forksvg .fp{{font:600 12px system-ui;fill:var(--ink)}}
+.forksvg .fb{{font:700 11px system-ui;fill:#08120a}}
+.forksvg .fg{{font:600 13px system-ui;fill:var(--mute)}}
+.forksvg .fl{{font:700 12px system-ui;fill:var(--mute);text-transform:uppercase}}
+.forksvg .fedge{{stroke:var(--rule);stroke-width:2;fill:none}}
+.forksvg .fdash{{stroke-dasharray:6 5}}
+.forksvg .fdead{{stroke-dasharray:4 3}}
+.forksvg .fx{{stroke:var(--bad);stroke-width:2.5;stroke-linecap:round}}
+
+.fkey{{display:inline-block;padding:1px 6px;margin-right:6px;border-radius:3px;font:600 10px system-ui;color:#08120a}}
 </style>
 </head>
 <body>
@@ -1410,6 +1652,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <div class="card"><div class="k">{tipped("Tip", TIPS["tip"])}</div><div class="v">{tip_h}<br>{tip_html}</div></div>
 </div>
 
+{forks_html}
 <h2>Pool share, <span id="rangelabel">last 1 hour</span></h2>
 <p class="note">{tipped("Who is finding the blocks.", TIPS["pool_share"])} A pool near half the ring is the one that could reorganize the chain on its own. Click a slice or a legend entry to jump to that pool's row below.</p>
 <div class="rangebar"><label for="rangesel">Window</label> <select id="rangesel">{range_opts}</select></div>
