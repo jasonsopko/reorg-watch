@@ -168,6 +168,16 @@ so the watcher saw a depth-2 reorg against the live chain:
 
 ## Status page
 
+`--html FILE` writes a self-contained page after every run: node and explorer
+status, the block tree, blocks by pool for the last 24 hours with an hourly
+breakdown, reward flow and blocks by wallet, latest blocks, recent reward
+movements, and recent events. Every column header and every classification
+says how it was determined on hover or focus, and a "How this page decides"
+section at the bottom repeats the method in plain text for readers on phones.
+Tables never scroll sideways: they use fixed layout with wrapping, and below
+about 700px each row reflows into labeled lines. One file, no external
+assets. Serve it from wherever you already serve static files.
+
 The page opens with a strip of the most recent blocks and a donut of the last
 24 hours of pool share, both in the mempool.space idiom. One colour set,
 assigned to the day's top seven pools in a fixed order and reused by the strip
@@ -176,28 +186,46 @@ colours were checked with the data-viz validator for colourblind separation
 and contrast in light and dark, and identity is carried by the legend and the
 block labels, never colour alone.
 
-## Status page
-
-`--html FILE` writes a self-contained page after every run: node and explorer
-status, blocks by pool for the last 24 hours with an hourly breakdown, reward
-flow and blocks by wallet, latest blocks, recent reward movements, and recent
-events. Every column header and every classification says how it was
-determined on hover or focus, and a "How this page decides" section at the
-bottom repeats the method in plain text for readers on phones. Tables never
-scroll sideways: they use fixed layout with wrapping, and below about 700px
-each row reflows into labeled lines. One file, no external assets, no scripts beyond a staleness
-check. Serve it from wherever you already serve static files.
-
 Pool names are HTML-escaped on the way out. Coinbase tags are text the miner
 chose and must never reach a browser raw.
 
-The page refreshes itself every five minutes and shows a red banner when it
-is more than 15 minutes old, so a dead generator is visible to readers
-instead of silent.
+### The block tree
+
+An SVG of what the chain did. The kept chain runs along the top to the tip;
+a branch that lost sits below the height it contested and dead-ends there
+with a cross. Long uncontested runs collapse so the contested parts sit
+together, and the most recent blocks are drawn one at a time, which is where
+a new fork shows up first. The newest block is on the left, so a block's
+parent is the column to its right. A branch deeper than one block is drawn
+as a chain of its own: only its oldest block hangs off the common ancestor,
+and only its tip carries the status badge and the cross.
+
+It needs `chain-tips.json` in the state directory, from a separate
+`getchaintips` reader. Two other sections work the same way: the pool
+endpoint survey needs `pool-survey.json`, and the peer agreement panel needs
+`peer-crawl.json`. A missing file renders nothing and leaves the rest of the
+page alone.
+
+### Reloading
+
+The page reloads when a block lands rather than on a timer. It prefers a
+WebSocket at `/ws`; failing that it polls `tip.json`, a small file written
+next to the page after each render, so it never advertises a tip the page
+does not yet show. A meta refresh at 600s covers readers without JavaScript.
+A red banner appears when the page is more than 15 minutes old, so a dead
+generator is visible to readers instead of silent.
+
+Serving the page behind a Content-Security-Policy needs `connect-src`.
+Without it `connect-src` falls back to `default-src` and the browser blocks
+fetch and WebSocket outright, with no visible error and no reloading:
 
 ```
-* * * * * $HOME/bin/reorg-watch.py --html /var/www/reorg/index.html --notify 'mail -s "reorg-watch ALERT" you@example.com' >> $HOME/reorg-watch.log 2>&1
+connect-src 'self' wss://your.host;
 ```
+
+The WebSocket is optional. Point `/ws` at a mempool backend on the same host
+if you run one. Without it the page polls and still reloads on a block, a few
+seconds later.
 
 ## How it decides
 
@@ -215,8 +243,10 @@ downloaded show as `unknown (no block data)`.
 
 ## Limits
 
-- One node's view. The explorer cross-check adds a second vantage point, and
-  that is all it is.
+- One node's view of what happened. The explorer cross-check adds a second
+  vantage point, and the peer agreement panel adds more when its file is
+  present. None of that helps with a losing block that never reached this
+  node: if no peer relayed it, it cannot be reported.
 - Polls once a minute. A reorg done and undone inside a minute is missed.
 - Attribution is only as good as the pools list, and a coinbase tag can be
   spoofed. Payout addresses are harder to fake and are matched first, which
