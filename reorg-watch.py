@@ -1515,7 +1515,7 @@ def render_html(path, sd, st):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="300">
+<meta http-equiv="refresh" content="600">
 <title>Bitcoin Knots reorg watch</title>
 <style>
 html {{ font-size: 17.5px; }}
@@ -1795,6 +1795,60 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
   }}
 }})();
 </script>
+<script>
+(function () {{
+  // Reload when a block is found, not on a timer. Two routes: a WebSocket pushed from the
+  // mempool instance on this host, and a poll of tip.json as the fallback. tip.json is
+  // written straight after the page, so a change there means new content is already there.
+  var here = {tip_h};
+  var done = false;
+  function refresh(h) {{
+    if (done || !h || h <= here) return;   // only forward: mempool may lag the node briefly
+    done = true;
+    // The socket can hear about a block before the page has been rebuilt. Wait until
+    // tip.json says the new height is on disk, or give up and reload anyway, rather than
+    // reloading onto the old page and bouncing again.
+    var tries = 0;
+    (function confirm() {{
+      fetch("tip.json?t=" + Date.now(), {{cache: "no-store"}})
+        .then(function (r) {{ return r.ok ? r.json() : null; }})
+        .then(function (d) {{
+          if ((d && d.height >= h) || ++tries > 8) location.reload();
+          else setTimeout(confirm, 1200);
+        }})
+        .catch(function () {{ if (++tries > 8) location.reload(); else setTimeout(confirm, 1200); }});
+    }})();
+  }}
+  // --- fallback: poll the sidecar ---
+  var fails = 0, polling = false;
+  function schedule() {{ setTimeout(poll, fails > 3 ? 60000 : 3000); }}
+  function poll() {{
+    if (done) return;
+    fetch("tip.json?t=" + Date.now(), {{cache: "no-store"}})
+      .then(function (r) {{ return r.ok ? r.json() : null; }})
+      .then(function (d) {{ fails = 0; if (d) refresh(d.height); schedule(); }})
+      .catch(function () {{ fails++; schedule(); }});
+  }}
+  function startPolling() {{ if (!polling) {{ polling = true; schedule(); }} }}
+  // --- preferred: a block pushed over the socket ---
+  try {{
+    var ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+    var alive = setTimeout(startPolling, 8000);   // socket never opened; fall back
+    ws.onopen = function () {{ ws.send(JSON.stringify({{action: "want", data: ["blocks"]}})); }};
+    ws.onmessage = function (ev) {{
+      clearTimeout(alive);
+      try {{
+        var d = JSON.parse(ev.data), h = 0;
+        if (d.block && d.block.height) h = d.block.height;
+        else if (d.blocks && d.blocks.length) h = d.blocks[d.blocks.length - 1].height;
+        if (h) refresh(h);
+      }} catch (e) {{}}
+    }};
+    ws.onclose = startPolling;
+    ws.onerror = startPolling;
+  }} catch (e) {{ startPolling(); }}
+}})();
+</script>
 </body>
 </html>
 """
@@ -2025,6 +2079,18 @@ def finish(sd, args, st, state_path, events):
             render_html(args.html, sd, st)
         except Exception as e:  # noqa: BLE001
             print(f"{ts()} html render failed: {e}")
+        else:
+            # A few bytes for the open page to poll, so it reloads when a block lands
+            # instead of on a blind timer. Written last, so it never advertises a tip the
+            # page does not yet show.
+            try:
+                tmp = args.html + ".tip.tmp"
+                with open(tmp, "w") as f:
+                    json.dump({"height": st.get("tip_height"), "hash": st.get("tip_hash"),
+                               "generated": int(NOW)}, f)
+                os.replace(tmp, os.path.join(os.path.dirname(args.html) or ".", "tip.json"))
+            except OSError as e:
+                print(f"{ts()} tip.json write failed: {e}")
     if not events:
         return
     md_path = os.path.join(sd, "reorg-log.md")
