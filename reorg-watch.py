@@ -990,6 +990,78 @@ def blocks_strip(latest, m):
 
 
 
+def render_survey(sd, E):
+    """The endpoint survey section. Absent file renders nothing at all."""
+    try:
+        sv = json.load(open(os.path.join(sd, "pool-survey.json")))
+    except Exception:
+        return ""
+    rows = ""
+    shown = 0
+    omitted = 0
+    for r in sv.get("pools", []):
+        oc = r.get("onchain") or {}
+        share = oc.get("share_pct")
+        probed = [e for e in r.get("endpoints", []) if e.get("probed_at")]
+        if not probed and (share or 0) < 1:
+            omitted += 1
+            continue
+        shown += 1
+        kind = r.get("kind", "pool")
+        if kind != "pool" and not probed:
+            eps = '<span class=note>%s</span>' % E({
+                "individual": "individual miner, not a pool with a public endpoint",
+                "marketplace": "hashrate marketplace, routes work to other pools",
+                "category": "label covers many independent miners, not one operator",
+            }.get(kind, "no endpoint recorded yet"))
+        elif probed:
+            eps = "<br>".join(
+                f'<span class=mono>{E(e["endpoint"])}</span> {E(e["verdict"])}'
+                + (f' &middot; {E(e["software"])}' if e.get("software") not in (None, "-", "unknown", "unparsed") else "")
+                for e in probed)
+        else:
+            eps = '<span class=note>no endpoint recorded yet</span>'
+        sw = ", ".join(E(x) for x in r.get("software", [])) or "-"
+        cls = {"D": "DATUM pool", "G": "Gateway, stratum v1", "O": "Other"}.get(oc.get("class_majority"), "-")
+        cons = r.get("consistency", "-")
+        klass = " class=note" if cons == "not testable" else ""
+        rows += (f'<tr><td>{E(r["label"])}</td><td class=n>{share if share is not None else "-"}</td>'
+                 f'<td>{eps}</td><td>{sw}</td><td>{E(r.get("datum","-"))}</td><td>{cls}</td>'
+                 f'<td>{E(r.get("payout_shape","-"))}</td>'
+                 f'<td{klass} title="{E(r.get("consistency_why",""))}">{E(cons)}</td></tr>')
+    if not rows:
+        return ""
+    shared = sv.get("shared_templates") or {}
+    shared_note = ""
+    if shared:
+        groups = "; ".join(", ".join(E(l) for l in v) for v in shared.values())
+        shared_note = (" <strong>Two labels handed out the same block template in one probe: "
+                       f"{groups}.</strong> That means one machine built the work for both.")
+    stamps = sorted(e["probed_at"] for r in sv.get("pools", [])
+                    for e in r.get("endpoints", []) if e.get("probed_at"))
+    gen = E(stamps[-1] if stamps else sv.get("generated", "unknown"))
+    return f"""
+<h2>What each pool runs</h2>
+<p class="note">Measured by connecting to each pool's own advertised endpoint and sending one
+Stratum v1 <span class=mono>mining.subscribe</span> with no credentials, then naming the server by
+matching its reply against each project's source code. Endpoints last probed {gen}. A pool may offer several
+protocols at once, so this records what an endpoint speaks, not how any particular block was built.
+{omitted} smaller pools with no endpoint on file are not listed.{shared_note}</p>
+<div class="wrap"><table class="stack wide dense">
+<tr><th>Pool</th><th class=n>Share</th><th>Endpoints probed</th><th>Server software</th><th>DATUM</th><th>Template built by</th><th>Coinbase payout</th><th>Consistency</th></tr>
+{rows}
+</table></div>
+<p class="note"><strong>Server software</strong> is named by matching the subscribe reply to the
+source of datum_gateway, miningcore, node-stratum-pool, ckpool and public-pool; each of those
+writes a distinguishable reply. <strong>DATUM</strong> records what was found, and absence from a
+web page is not evidence that a service does not exist. <strong>Consistency</strong> compares a
+pool's on-chain claim with what its endpoint actually does. <em>Not testable</em> is the ordinary
+state and is not a criticism. A mismatch is recorded only when a DATUM handshake against a
+published endpoint fails while the pool's blocks claim a DATUM upstream, or when a pool's signed
+DATUM payout script is not the script its blocks actually pay.</p>
+"""
+
+
 def render_html(path, sd, st):
     E = html.escape
     now = NOW
@@ -1204,6 +1276,7 @@ def render_html(path, sd, st):
         rw_note = (f"{len(rw.d['coinbases'])} coinbases indexed since height {DEFAULT_FLOOR}, {len(rw.d['spends'])} transactions have spent one. "
                    "Moved means a coinbase output was spent: a payout to miners, a consolidation, or a transfer out. "
                    "The chain shows movement, not a sale. Held is mined minus moved and includes immature rewards.")
+    survey_html = render_survey(sd, E)
     knot = ('<svg class="mark" viewBox="0 0 773 773" width="60" height="60" role="img" aria-label="Bitcoin Knots">'
             '<circle cx="386.5" cy="386.5" r="380" fill="#f7931a"/>'
             '<circle cx="386.5" cy="386.5" r="380" fill="none" stroke="#b8651a" stroke-width="14"/>'
@@ -1368,6 +1441,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 </table></div>
 <p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: the miner's own gateway and node built the block; the pool only coordinated payout. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block: one output kept by the pool and paid out later, two outputs, or paid directly to miners in the coinbase.</p>
 
+{survey_html}
 <h2>Latest blocks</h2>
 <div class="wrap"><table class="stack wide dense">
 <tr>{th("Height", "height", "n")}{th("Time", "time")}{th("Pool", "pool")}{th("Template built by", "builder")}{th("Coinbase tags", "tags")}{th("Header", "hdr")}{th("Txs", "txs", "n")}{th("Outputs", "outputs", "n")}{th("Reward BTC", "reward", "n")}{th("Fees BTC", "fees", "n")}</tr>
