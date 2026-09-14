@@ -1464,7 +1464,7 @@ def render_html(path, sd, st):
             return "1 output, pool custody" if med <= 1 else ("2 outputs" if med == 2 else f"direct, median {med} outputs")
         for label, p in summ[:12]:
             pct = f"{100 * p['moved'] / p['matured']:.0f}%" if p["matured"] else "-"
-            last = f"{tt(p['last_t'], 'minute')}<br>{p['last_kind']}" if p["last_t"] else "never"
+            last = f"{tt(p['last_t'], 'minute')}<br>{E(p['last_kind'])}" if p["last_t"] else "never"
             reward_rows += (f"<tr><td>{E(label)}</td><td class=n>{p['blocks']}</td><td>{template_mix(p['cls'])}</td><td>{E(payout_style(p['nouts']))}</td>"
                             f"<td class=n>{p['mined'] / 1e8:.2f}</td><td class=n>{p['matured'] / 1e8:.2f}</td><td class=n>{p['moved'] / 1e8:.2f}</td><td class=n>{pct}</td>"
                             f"<td class=n>{(p['mined'] - p['moved']) / 1e8:.2f}</td><td class=t>{last}</td></tr>")
