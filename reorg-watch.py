@@ -720,6 +720,8 @@ def explorer_check(base, st, H, X, events, verbose):
     if etip >= H:
         try:
             ehash = fetch([f"/api/block-height/{H}", f"/api/v1/block-height/{H}"])
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", ehash):
+                raise ValueError(f"explorer returned something other than a block hash: {ehash[:40]!r}")
             mismatch = ehash != X
         except Exception:  # noqa: BLE001
             pass
