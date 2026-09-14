@@ -1726,7 +1726,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 </ul>
 </main>
 <footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. One node's view, cross-checked once a minute against {ex_link}, whose explorer also has the block-by-block detail. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.</footer>
-<script>
+<script nonce="NONCE">
 (function () {{
   var gen = 1000 * parseInt(document.querySelector('.sub time[data-epoch]').getAttribute('data-epoch'), 10);
   var box = document.getElementById('stale');
@@ -1795,7 +1795,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
   }}
 }})();
 </script>
-<script>
+<script nonce="NONCE">
 (function () {{
   // Reload when a block is found, not on a timer. Two routes: a WebSocket pushed from the
   // mempool instance on this host, and a poll of tip.json as the fallback. tip.json is

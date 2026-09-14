@@ -223,6 +223,22 @@ fetch and WebSocket outright, with no visible error and no reloading:
 connect-src 'self' wss://your.host;
 ```
 
+Both script tags carry `nonce="NONCE"`, a placeholder for a per-request
+nonce, so the policy can drop `'unsafe-inline'` for scripts. With nginx,
+stamp it in and allow only that nonce:
+
+```
+add_header Content-Security-Policy "...; script-src 'nonce-$request_id'; ..." always;
+location / {
+    sub_filter 'nonce="NONCE"' 'nonce="$request_id"';
+    sub_filter_once off;
+    try_files $uri $uri/ =404;
+}
+```
+
+Without the substitution the attribute is inert and `script-src
+'unsafe-inline'` works as before.
+
 The WebSocket is optional. Point `/ws` at a mempool backend on the same host
 if you run one. Without it the page polls and still reloads on a block, a few
 seconds later.
