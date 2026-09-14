@@ -180,7 +180,9 @@ class Pools:
         if stale:
             try:
                 data = http_get(POOLS_URL, timeout=15)
-                json.loads(data)
+                lst = json.loads(data)
+                if not isinstance(lst, list) or not all(isinstance(e, dict) and isinstance(e.get("name"), str) for e in lst):
+                    raise ValueError("pools list is not a list of entries with a name")
                 with open(cache + ".tmp", "wb") as f:
                     f.write(data)
                 os.replace(cache + ".tmp", cache)
