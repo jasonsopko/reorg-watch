@@ -1812,15 +1812,22 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
     // The socket can hear about a block before the page has been rebuilt. Wait until
     // tip.json says the new height is on disk, or give up and reload anyway, rather than
     // reloading onto the old page and bouncing again.
+    // The reload goes to ?b=<height> so a CDN in front can serve one cached copy of the
+    // new page to every viewer. A bare reload would fetch the cached OLD page, whose
+    // script would hear the same block and reload again until that entry expired. The
+    // give-up path uses a key nobody else shares, so a still-stale page is never cached
+    // under the new height. replace() keeps these out of the history.
     var tries = 0;
+    var go = function (key) {{ location.replace(location.pathname + "?b=" + key); }};
     (function confirm() {{
       fetch("tip.json?t=" + Date.now(), {{cache: "no-store"}})
         .then(function (r) {{ return r.ok ? r.json() : null; }})
         .then(function (d) {{
-          if ((d && d.height >= h) || ++tries > 8) location.reload();
+          if (d && d.height >= h) go(h);
+          else if (++tries > 8) go(h + "-" + Date.now());
           else setTimeout(confirm, 1200);
         }})
-        .catch(function () {{ if (++tries > 8) location.reload(); else setTimeout(confirm, 1200); }});
+        .catch(function () {{ if (++tries > 8) go(h + "-" + Date.now()); else setTimeout(confirm, 1200); }});
     }})();
   }}
   // --- fallback: poll the sidecar ---
