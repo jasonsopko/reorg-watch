@@ -473,6 +473,47 @@ def named(label):
     return not (label.startswith("Solo ") or label.lower().startswith("unknown") or label.lower().startswith("solo"))
 
 
+def payout_class(med, dom, kind):
+    """One reading of how the reward leaves a label's coinbases, shared by every table on the
+    page and by pools.json so they cannot disagree. med is the median number of value-bearing
+    outputs, dom the percentage of all value paid to the single most-paid script, kind the
+    survey's kind for the label (pool, individual, marketplace, category) or None when the
+    label is not in the survey. Returns (key, short text, one-sentence detail)."""
+    if med is None:
+        return "none", "no blocks attributed", "No coinbase of this label is in the index."
+    outs = f"{med} output{'s' if med != 1 else ''} per block"
+    top = f"{dom:.0f}% of all value to the single most-paid address" if dom is not None else "most-paid address not measured"
+    if med >= 3:
+        return ("coinbase", f"paid to miners in the coinbase, median {med} outputs",
+                f"Median {med} value-bearing outputs per block: the miners' shares are in the block itself, {top}.")
+    if dom is not None and dom < 50:
+        return ("finder", "paid to the finder in the coinbase",
+                f"{outs}, but to a different address from block to block ({top}), so whoever found the block was paid in it.")
+    if kind == "pool":
+        return ("held", "held by the pool, paid later",
+                f"{outs}, {top}: the pool receives every reward and pays miners afterwards from its balance. Earlier versions of this page called this pool custody.")
+    if kind == "marketplace":
+        return ("held", "held by the marketplace, paid later",
+                f"{outs}, {top}: the marketplace receives every reward and pays its sellers afterwards.")
+    if kind == "individual":
+        return ("own", "solo, to the miner's own address",
+                f"{outs}, {top}: one miner paying themselves, so there is nobody to pay later.")
+    if kind == "category":
+        return ("one", "all to one address",
+                f"{outs}, {top}. This label covers many independent miners, so one address taking most of the value is unexpected.")
+    return ("one", "all to one address",
+            f"{outs}, {top}. Whether that address belongs to a pool that pays miners later or to a solo miner cannot be read from the chain, and this label is not in the pool survey.")
+
+
+def survey_kinds(sd):
+    """Label to kind (pool, individual, marketplace, category) from pool-survey.json; empty without it."""
+    try:
+        sv = json.load(open(os.path.join(sd, "pool-survey.json")))
+    except Exception:
+        return {}
+    return {r["label"]: r.get("kind", "pool") for r in sv.get("pools", []) if r.get("label")}
+
+
 def canary_scripts(sd):
     """Hex scriptPubKeys of our canary miners, from canaries.json in the state directory."""
     try:
@@ -689,18 +730,20 @@ class Rewards:
         per = {}
         for c in self.d["coinbases"].values():
             p = per.setdefault(c["label"], {"blocks": 0, "mined": 0, "matured": 0, "moved": 0, "n_spends": 0, "last_t": None, "last_kind": None,
-                                            "cls": {}, "nouts": []})
+                                            "cls": {}, "nouts": [], "by_spk": {}})
             sats = sum(v for _, v in c["outs"].values())
             p["blocks"] += 1
             p["mined"] += sats
             p["cls"][c.get("cls", "O")] = p["cls"].get(c.get("cls", "O"), 0) + 1
             p["nouts"].append(len(c["outs"]))
+            for spk, v in c["outs"].values():
+                p["by_spk"][spk] = p["by_spk"].get(spk, 0) + v
             if c["h"] <= tip - 100:
                 p["matured"] += sats
         for x in self.d["spends"]:
             for label, sats in x["labels"].items():
                 p = per.setdefault(label, {"blocks": 0, "mined": 0, "matured": 0, "moved": 0, "n_spends": 0, "last_t": None, "last_kind": None,
-                                           "cls": {}, "nouts": []})
+                                           "cls": {}, "nouts": [], "by_spk": {}})
                 p["moved"] += sats
                 p["n_spends"] += 1
                 if p["last_t"] is None or x["t"] > p["last_t"]:
@@ -863,7 +906,7 @@ TIPS = {
     "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
     "hourshare": "This pool's share of that hour's blocks. The three columns are the three largest pools of the day. Cells at or above half are marked.",
     "blocks_fork": "All blocks this label has mined since the BLAKE2b fork block.",
-    "payout": "Median number of value-bearing outputs in this pool's coinbases. One output means the pool keeps the reward and pays miners later; two is a split; three or more is paid directly to miners in the coinbase.",
+    "payout": "How the reward leaves this label's blocks, read from its coinbases: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
     "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC.",
     "matured": "Mined at least 100 blocks ago, so spendable.",
     "moved": "Coinbase outputs of this pool that have been spent in any later transaction, whether a payout to miners, a consolidation, or a transfer. The chain shows movement, not a sale.",
@@ -891,7 +934,7 @@ TIPS = {
     "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
     "choose_datum": "Whether a DATUM service was found: yes when a pool pubkey and endpoint are published, or the endpoint alone, or documented on the site. The fee is what the pool's site says, read on the date in pools.json.",
     "choose_sv1": "Public stratum v1 endpoints that answered a probe. The fee is what the pool's site says, read on the date in pools.json.",
-    "choose_paid": "Measured from this pool's coinbases over the survey window: the median number of value-bearing outputs and the share of all value paid to the single most-paid script. One or two outputs with most of the value on one script means the pool holds the reward and pays later.",
+    "choose_paid": "Measured from this pool's coinbases over the survey window, not taken from its site: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Held by the pool, paid later: one or two outputs with most of the value to one address. Paid in the coinbase: the miners, or the finder, are paid in the block itself.",
     "choose_trust_v1": "On a public stratum v1 port the pool's node always builds the block, so you hand it the choice of transactions. Whether it also holds your reward is the measured payout column.",
     "choose_trust_gw": "With your own DATUM gateway your node builds the block and the pool only sets the coinbase outputs. Neither means the block is yours and the reward reaches you in the coinbase. You still rely on the pool's share accounting, which you can check in every block.",
     "risk_share": "The pool that found the most blocks in the window, and its share. Names come from the coinbase, so this is the share of a label; the wallet table below merges labels that share a wallet.",
@@ -1296,7 +1339,7 @@ def render_survey(sd, E):
         klass = " class=note" if cons == "not testable" else ""
         rows += (f'<tr><td>{E(r["label"])}</td><td class=n>{share if share is not None else "-"}</td>'
                  f'<td>{eps}</td><td>{sw}</td><td>{E(r.get("datum","-"))}</td><td>{cls}</td>'
-                 f'<td>{E(r.get("payout_shape","-"))}</td>'
+                 f'<td>{tipped(*payout_class(oc.get("median_outputs"), oc.get("dominant_script_pct"), kind)[1:])}</td>'
                  f'<td{klass} title="{E(r.get("consistency_why",""))}">{E(cons)}</td></tr>')
     if not rows:
         return ""
@@ -1582,19 +1625,8 @@ def choose_rows(sd, week, week_total, canaries):
         label = r["label"]
         n7 = week.get(label, 0) if week is not None and oc else None
         med, dom = oc.get("median_outputs"), oc.get("dominant_script_pct")
-        if med is None:
-            custody, paid = None, "no blocks attributed"
-        elif med <= 1 and dom is not None and dom < 50:
-            custody, paid = False, f"one output per block to different scripts, {dom:.0f}% to the largest: the finder is paid"
-        elif med <= 2 and (dom is None or dom >= 50):
-            custody = True
-            paid = f"held by the pool and paid later: {med} output{'s' if med != 1 else ''}"
-            if dom is not None:
-                paid += f", {dom:.0f}% of the value to one script"
-        elif med <= 2:
-            custody, paid = False, f"split in the coinbase: {med} outputs, {dom:.0f}% to the largest"
-        else:
-            custody, paid = False, f"in the coinbase: median {med} outputs"
+        pkey, paid, pdetail = payout_class(med, dom, "pool")
+        custody = {"held": True, "finder": False, "coinbase": False}.get(pkey)
         v1 = [e["endpoint"] for e in probed if e.get("verdict") == "stratum-v1"]
         v1_listed = any(e.get("expect") == "stratum-v1" for e in eps)
         dstat = r.get("datum") or ""
@@ -1615,7 +1647,7 @@ def choose_rows(sd, week, week_total, canaries):
             "blocks_per_day": round(n7 / 7, 1) if n7 is not None else None,
             "share_window_pct": oc.get("share_pct"), "class_mix": oc.get("class_mix"),
             "template_builder": oc.get("class_majority"),
-            "payout": {"median_outputs": med, "dominant_script_pct": dom, "custody": custody, "text": paid},
+            "payout": {"median_outputs": med, "dominant_script_pct": dom, "custody": custody, "class": pkey, "text": paid, "detail": pdetail},
             "sv1": {"endpoints": v1, "listed": v1_listed, "fee": terms.get("sv1_fee", "")},
             "datum": {"status": dshort, "detail": dstat, "fee": terms.get("datum_fee", "")},
             "trust": {"sv1_port": trust_v1, "own_gateway": trust_gw},
@@ -1685,7 +1717,7 @@ def render_choose(rows, generated, E):
         share = f'{x["share_7d_pct"]:.1f}%' if x["share_7d_pct"] is not None else "-"
         bpd = f'{x["blocks_per_day"]:.1f}' if x["blocks_per_day"] is not None else "-"
         body += (f'<tr><td>{name}</td><td class=n>{share}</td><td class=n>{bpd}</td>'
-                 f'<td>{cell_datum(x)}</td><td>{cell_v1(x)}</td><td>{E(x["payout"]["text"])}</td>'
+                 f'<td>{cell_datum(x)}</td><td>{cell_v1(x)}</td><td>{tipped(x["payout"]["text"], x["payout"]["detail"])}</td>'
                  f'<td>{cell_trust(x["trust"]["sv1_port"])}</td><td>{cell_trust(x["trust"]["own_gateway"])}</td>'
                  + (f'<td>{cell_canary(x)}</td>' if has_canary else "") + '</tr>')
     return f"""
@@ -1880,15 +1912,19 @@ def render_html(path, sd, st):
             top = sorted(cls.items(), key=lambda kv: -kv[1])
             return ", ".join(tipped(CLASS_NAMES[k] + (f" {100 * v / n:.0f}%" if len(top) > 1 else ""), CLASS_TIPS[k]) for k, v in top[:2])
 
-        def payout_style(nouts):
-            if not nouts:
+        kinds = survey_kinds(sd)
+
+        def payout_cell(label, p):
+            if not p["nouts"]:
                 return "-"
-            med = sorted(nouts)[len(nouts) // 2]
-            return "1 output, pool custody" if med <= 1 else ("2 outputs" if med == 2 else f"direct, median {med} outputs")
+            med = sorted(p["nouts"])[len(p["nouts"]) // 2]
+            dom = 100 * max(p["by_spk"].values()) / p["mined"] if p["mined"] and p["by_spk"] else None
+            kind = kinds.get(label) or ("individual" if label.startswith("Solo ") else None)
+            return tipped(*payout_class(med, dom, kind)[1:])
         for label, p in summ[:12]:
             pct = f"{100 * p['moved'] / p['matured']:.0f}%" if p["matured"] else "-"
             last = f"{tt(p['last_t'], 'minute')}<br>{E(p['last_kind'])}" if p["last_t"] else "never"
-            reward_rows += (f"<tr><td>{E(label)}</td><td class=n>{p['blocks']}</td><td>{template_mix(p['cls'])}</td><td>{E(payout_style(p['nouts']))}</td>"
+            reward_rows += (f"<tr><td>{E(label)}</td><td class=n>{p['blocks']}</td><td>{template_mix(p['cls'])}</td><td>{payout_cell(label, p)}</td>"
                             f"<td class=n>{p['mined'] / 1e8:.2f}</td><td class=n>{p['matured'] / 1e8:.2f}</td><td class=n>{p['moved'] / 1e8:.2f}</td><td class=n>{pct}</td>"
                             f"<td class=n>{(p['mined'] - p['moved']) / 1e8:.2f}</td><td class=t>{last}</td></tr>")
         latest = sorted(rw.d["coinbases"].values(), key=lambda c: -c["h"])[:20]
@@ -2114,7 +2150,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <tr>{th("Pool", "pool")}{th("Blocks", "blocks_fork", "n")}{th("Template built by", "builder")}{th("Coinbase payout", "payout")}{th("Mined BTC", "mined", "n")}{th("Matured", "matured", "n")}{th("Moved", "moved", "n")}{th("Moved / matured", "moved_pct", "n")}{th("Held", "held", "n")}{th("Last movement", "last_move")}</tr>
 {reward_rows or "<tr><td colspan=10 class=note>none</td></tr>"}
 </table></div>
-<p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: the miner's own gateway and node built the block; the pool only coordinated payout. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block: one output kept by the pool and paid out later, two outputs, or paid directly to miners in the coinbase.</p>
+<p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: the miner's own gateway and node built the block; the pool only coordinated payout. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block, read from the coinbases: <em>paid to miners in the coinbase</em> (three or more outputs), <em>paid to the finder in the coinbase</em> (one or two outputs, to a different address each block), or <em>held by the pool, paid later</em> (one or two outputs, most of the value to one address; earlier versions of this page called this pool custody). Hover or tap a cell for the numbers behind it.</p>
 
 {choose_html}
 {survey_html}
