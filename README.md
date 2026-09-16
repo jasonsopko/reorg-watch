@@ -27,6 +27,9 @@ Once a minute, from the node's REST interface:
 | explorer mismatch | ALERT | The explorer has a different block at our tip height for two consecutive checks. |
 | node behind explorer | ALERT | The explorer is three or more blocks ahead for three consecutive checks. Partition, stall, or eclipse. |
 | node unreachable | ALERT | REST did not answer for three consecutive runs. |
+| pool share high | ALERT | One pool found 45 percent or more of the last 6 hours, with at least 40 blocks in them. Repeats at most every 6 hours per pool. |
+| block rate step | ALERT | Blocks in the last 6 hours under 65 or over 150 percent of the prior day's pace. Skipped when a difficulty retarget falls inside either window. |
+| orphan wins | ALERT | One pool won 3 or more depth-1 reorgs against other pools in 24 hours, which is what selfish mining looks like from outside. |
 
 Pool attribution matches the coinbase tag and payout addresses against
 Kilombino's `pools-v2.json`, the list mempool.guide and mempool.kilombino.com
@@ -140,6 +143,7 @@ Everything lives in `~/.reorg-watch/` (change with `--state`):
   Heights, hashes, pool names, timestamps. No local paths.
 - `events.jsonl`: one JSON object per event, for scripts.
 - `pools.json`: next to the page, the "Choosing a pool" rows with their method text.
+- `risk.json`: next to the page, the reversal-risk numbers and the state of the concentration checks.
 - `state.json`: the saved window, one attribution record per block, and counters.
 - `rewards.json`: every coinbase output since the fork and every transaction that spent one.
 - `pools-v2.json`: cached pool list, refreshed every six hours.
@@ -206,6 +210,20 @@ It needs `chain-tips.json` in the state directory, from a separate
 endpoint survey needs `pool-survey.json`, and the peer agreement panel needs
 `peer-crawl.json`. A missing file renders nothing and leaves the rest of the
 page alone.
+
+### Reversal risk
+
+Placed under the share ring. It turns the largest pool's share of recent
+blocks into the probability that the pool could reverse a payment after a
+given number of confirmations, using the Bitcoin whitepaper's formula with
+Poisson attacker progress, and prints the smallest confirmation count with
+odds under one percent and under a tenth of a percent at the 3-day share.
+Reference rows at 40, 45 and 49 percent sit under the live row. The section
+says on the page why it is there and what it assumes: the whole pool acting
+as one attacker, and no other hashrate joining. At or above half it prints
+that no count is safe. The state of the three concentration checks and the
+time of the last such alert are shown under the table, and the same numbers
+are written next to the page as `risk.json`.
 
 ### Choosing a pool
 

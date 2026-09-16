@@ -55,6 +55,7 @@ reorg-log.md, pools-v2.json (cache), lock.
 """
 import argparse
 import fcntl
+import math
 import hashlib
 import html
 import json
@@ -75,6 +76,11 @@ POOLS_URL = "https://raw.githubusercontent.com/Kilombino/mempool-bip110/main/poo
 POOLS_REPO = "https://github.com/Kilombino/mempool-bip110"
 UA = "reorg-watch/1.1 (Bitcoin Knots node monitor)"
 REPO_URL = "https://github.com/jasonsopko/reorg-watch"
+# Early warnings for hashrate concentration. Each fires once per window per pool.
+SHARE_ALERT = 0.45        # one pool's share of the last 6 hours
+SHARE_MIN_BLOCKS = 40     # and at least this many blocks in those 6 hours
+RATE_LOW, RATE_HIGH = 0.65, 1.5   # blocks in 6 h against the prior day's pace
+ORPHAN_WINS = 3           # depth-1 reorgs one pool won against others in 24 h
 NOW = time.time()
 
 
@@ -817,6 +823,12 @@ def line_for(e):
     if t == "label_overlap":
         nb = e.get("blocks", ["?", "?"])
         return f"ALERT one wallet behind both {e['labels'][0]} ({nb[0]} blocks) and {e['labels'][1]} ({nb[1]} blocks); address {e.get('shared_address', '?')[:16]}.."
+    if t == "pool_share_high":
+        return f"ALERT {e['pool']} found {e['share']}% of the last {e['hours']} h ({e['blocks']}/{e['of']} blocks)"
+    if t == "block_rate_step":
+        return f"ALERT block pace {e['ratio']}x the prior day: {e['blocks_6h']} blocks in 6 h against {e['expected_6h']} expected"
+    if t == "orphan_wins":
+        return f"ALERT {e['pool']} won {e['wins']} depth-1 reorgs against other pools in {e['hours']} h"
     if t == "wallet_share":
         return f"ALERT one wallet mined {e['share']}% of the last 24 h ({e['blocks']}/{e['of']} blocks) under labels {', '.join(e['labels'])}"
     return f"{e.get('level', 'INFO')} {t} " + json.dumps({k: v for k, v in e.items() if k not in ('type', 'level')})
@@ -840,7 +852,7 @@ TIPS = {
     "node": "The node answered its REST interface this run. Three misses in a row is an alert.",
     "explorer": "The explorer's block hash at our tip height is compared with ours once a minute. A different hash for 2 consecutive checks, or the explorer 3 or more blocks ahead for 3 checks, is an alert.",
     "reorgs": "A reorg is counted when the active chain's hash at an already-seen height changes. Depth is the number of blocks replaced. Depth 1 is an ordinary tie between two blocks found seconds apart; depth 2 or more is an alert.",
-    "last_alert": "Most recent event that was emailed: a reorg of depth 2 or more, an explorer disagreement, a node that fell behind, a node outage, or two substantial pool names found sharing one wallet.",
+    "last_alert": "Most recent event that was emailed: a reorg of depth 2 or more, an explorer disagreement, a node that fell behind, a node outage, two substantial pool names found sharing one wallet, or one of the concentration checks: a pool above 45 percent of 6 hours, a step in block pace, or one pool winning repeated ties.",
     "tip": "Height and hash of the node's best block at the time this page was generated.",
     "pool": "A pool named in the coinbase tag and paid in the coinbase wins; otherwise the first payout address in Kilombino's pool list, then the tag. Both are chosen by the miner, so a name is a claim, not proof.",
     "blocks24": "Blocks whose header time falls in the last 24 hours. Shares are block counts and carry a few points of statistical noise.",
@@ -882,6 +894,10 @@ TIPS = {
     "choose_paid": "Measured from this pool's coinbases over the survey window: the median number of value-bearing outputs and the share of all value paid to the single most-paid script. One or two outputs with most of the value on one script means the pool holds the reward and pays later.",
     "choose_trust_v1": "On a public stratum v1 port the pool's node always builds the block, so you hand it the choice of transactions. Whether it also holds your reward is the measured payout column.",
     "choose_trust_gw": "With your own DATUM gateway your node builds the block and the pool only sets the coinbase outputs. Neither means the block is yours and the reward reaches you in the coinbase. You still rely on the pool's share accounting, which you can check in every block.",
+    "risk_share": "The pool that found the most blocks in the window, and its share. Names come from the coinbase, so this is the share of a label; the wallet table below merges labels that share a wallet.",
+    "risk_confs": "Smallest number of confirmations at which the largest pool's 3-day share gives reversal odds under the stated level, by the whitepaper formula. None means the pool holds half or more and no count is safe.",
+    "risk_table": "Probability that a pool with the given share reverses a payment after that many confirmations, if the whole pool mines a private chain from the moment of the payment. The whitepaper formula with Poisson attacker progress; it assumes no other hashrate joins.",
+    "risk_monitor": "Three checks run every minute. Share: one pool above 45 percent of the last 6 hours, with at least 40 blocks. Pace: blocks in the last 6 hours under 65 or over 150 percent of the prior day's pace, skipped across a difficulty retarget. Ties: one pool winning 3 or more depth-1 reorgs against other pools in 24 hours, which is what selfish mining looks like from outside. Each alert repeats at most once per window.",
     "choose_canary": "A canary is a small miner of ours pointed at the pool with a fresh address, on the path named. Paid in the coinbase means our address appeared in one of the pool's coinbases. Paid later means a transaction spending the pool's coinbase paid it. Waiting means no payment has been seen yet.",
     "level": "INFO is logged. ALERT is logged and emailed.",
     "event": "Reorgs name the pools on both sides. Explorer and node events say which check failed and for how many consecutive runs.",
@@ -1313,6 +1329,176 @@ state and is not a criticism. A mismatch is recorded only when a DATUM handshake
 published endpoint fails while the pool's blocks claim a DATUM upstream, or when a pool's signed
 DATUM payout script is not the script its blocks actually pay.</p>
 """
+
+
+def reversal_odds(q, z):
+    """Probability that a miner holding share q of the hashrate catches up from z blocks
+    behind: the Bitcoin whitepaper's formula with Poisson attacker progress."""
+    if q <= 0 or z <= 0:
+        return 0.0 if z > 0 else 1.0
+    if q >= 0.5:
+        return 1.0
+    p = 1 - q
+    lam = z * q / p
+    r = q / p
+    s = 0.0
+    for k in range(z + 1):
+        s += math.exp(-lam + k * math.log(lam) - math.lgamma(k + 1)) * (1 - r ** (z - k))
+    return max(0.0, min(1.0, 1 - s))
+
+
+def confirmations_for(q, p_max):
+    """Smallest confirmation count with reversal odds under p_max; None at or above half."""
+    if q >= 0.5:
+        return None
+    for z in list(range(1, 61)) + list(range(70, 601, 10)):
+        if reversal_odds(q, z) < p_max:
+            return z
+    return None
+
+
+def largest_pool(records, now, window):
+    """(label, count, total) over (label, time) records inside the window."""
+    counts = {}
+    for label, t in records:
+        if now - t <= window:
+            counts[label] = counts.get(label, 0) + 1
+    total = sum(counts.values())
+    if not total:
+        return None, 0, 0
+    label = max(counts, key=counts.get)
+    return label, counts[label], total
+
+
+def read_reorgs(sd, since, extra=()):
+    """Reorg events on file since a time, plus any from the current run."""
+    out = []
+    try:
+        with open(os.path.join(sd, "events.jsonl")) as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("type") == "reorg" and e.get("_t", 0) >= since:
+                    out.append(e)
+    except OSError:
+        pass
+    out += [e for e in extra if e.get("type") == "reorg"]
+    return out
+
+
+def risk_metrics(sd, st, now, events=()):
+    """The numbers behind the concentration alerts and the risk section."""
+    blocks = [(b["pool"], b["time"], int(h)) for h, b in st.get("blocks", {}).items() if b.get("time")]
+    label6, n6, t6 = largest_pool(((p, t) for p, t, _ in blocks), now, 6 * 3600)
+    recent = [h for _, t, h in blocks if now - t <= 6 * 3600]
+    base = [h for _, t, h in blocks if 6 * 3600 < now - t <= 30 * 3600]
+    oldest = min((t for _, t, _ in blocks), default=now)
+    pace_ok = (now - oldest) >= 24 * 3600 and len(base) >= 40 and not any(h % 2016 == 0 for h in recent + base)
+    wins = {}
+    for e in read_reorgs(sd, now - 86400, events):
+        if e.get("depth") == 1 and e.get("new") and e.get("old"):
+            w, lost = e["new"][0].get("pool"), e["old"][0].get("pool")
+            if w and w != lost:
+                wins[w] = wins.get(w, 0) + 1
+    return {"share6": {"pool": label6, "blocks": n6, "of": t6, "share": (n6 / t6) if t6 else None},
+            "pace": {"blocks_6h": len(recent), "expected_6h": round(len(base) / 4, 1) if base else None,
+                     "ratio": (len(recent) / (len(base) / 4)) if base else None, "checked": pace_ok},
+            "wins24": wins}
+
+
+def concentration_checks(sd, st, events, now):
+    """Three early warnings, each repeated at most once per window per pool."""
+    m = risk_metrics(sd, st, now, events)
+    risk = st.setdefault("risk", {})
+    s6 = m["share6"]
+    if s6["of"] >= SHARE_MIN_BLOCKS and s6["share"] >= SHARE_ALERT:
+        if now - risk.setdefault("share_alerted", {}).get(s6["pool"], 0) >= 6 * 3600:
+            risk["share_alerted"][s6["pool"]] = now
+            events.append({"type": "pool_share_high", "level": "ALERT", "pool": s6["pool"], "blocks": s6["blocks"],
+                           "of": s6["of"], "share": round(100 * s6["share"], 1), "hours": 6})
+    pc = m["pace"]
+    if pc["checked"] and (pc["ratio"] <= RATE_LOW or pc["ratio"] >= RATE_HIGH):
+        if now - risk.get("rate_alerted", 0) >= 6 * 3600:
+            risk["rate_alerted"] = now
+            events.append({"type": "block_rate_step", "level": "ALERT", "blocks_6h": pc["blocks_6h"],
+                           "expected_6h": pc["expected_6h"], "ratio": round(pc["ratio"], 2)})
+    for w, c in m["wins24"].items():
+        if c >= ORPHAN_WINS and now - risk.setdefault("orphan_alerted", {}).get(w, 0) >= 86400:
+            risk["orphan_alerted"][w] = now
+            events.append({"type": "orphan_wins", "level": "ALERT", "pool": w, "wins": c, "hours": 24})
+    return m
+
+
+def render_risk(sd, st, rw, E, now):
+    """The reversal-risk section: the largest pool's share turned into confirmation counts,
+    the reference table, and the state of the three checks."""
+    blocks = [(b["pool"], b["time"]) for b in st.get("blocks", {}).values() if b.get("time")]
+    l24, n24, t24 = largest_pool(blocks, now, 86400)
+    if rw is not None:
+        cbs = [(c["label"], c["t"]) for c in rw.d["coinbases"].values()]
+        l3, n3, t3 = largest_pool(cbs, now, 3 * 86400)
+    else:
+        l3, n3, t3 = None, 0, 0
+    q24 = n24 / t24 if t24 else None
+    q3 = n3 / t3 if t3 else None
+    q = q3 if q3 is not None else q24
+    if q is None:
+        return "", None
+    who = l3 if q3 is not None else l24
+    z1, z01 = confirmations_for(q, 0.01), confirmations_for(q, 0.001)
+    over = (q24 or 0) >= 0.5 or (q3 or 0) >= 0.5
+    zs = (6, 12, 30, 60, 100)
+    rows = [(f"{E(who)} now, {100 * q:.1f}%", q)] + [(f"a pool at {int(100 * x)}%", x) for x in (0.40, 0.45, 0.49)]
+    table = "".join(f"<tr><td>{name}</td>" + "".join(f"<td class=n>{100 * reversal_odds(x, z):.1f}%</td>" for z in zs) + "</tr>"
+                    for name, x in rows)
+    m = risk_metrics(sd, st, now)
+    s6, pc = m["share6"], m["pace"]
+    wins = ", ".join(f"{E(k)} {v}" for k, v in sorted(m["wins24"].items(), key=lambda kv: -kv[1])) or "none"
+    risk = st.get("risk", {})
+    last = max(list(risk.get("share_alerted", {}).values()) + list(risk.get("orphan_alerted", {}).values()) + [risk.get("rate_alerted", 0)])
+    conf_line = ("<strong>No confirmation count is safe while one pool holds half the hashrate.</strong>" if over
+                 else f"Confirmations for reversal odds under one percent at that share: <strong>{z1}</strong>; under a tenth of a percent: <strong>{z01}</strong>.")
+    feed = {"largest_pool": {"pool_24h": l24, "share_24h": round(100 * q24, 1) if q24 is not None else None,
+                             "pool_3d": l3, "share_3d": round(100 * q3, 1) if q3 is not None else None},
+            "confirmations": {"under_1pct": z1, "under_0_1pct": z01, "share_used": round(100 * q, 1), "over_half": over},
+            "table": {name: {str(z): round(100 * reversal_odds(x, z), 2) for z in zs} for name, x in
+                      [("largest_pool", q), ("40", 0.40), ("45", 0.45), ("49", 0.49)]},
+            "monitoring": {"share_6h": {"pool": s6["pool"], "blocks": s6["blocks"], "of": s6["of"],
+                                        "share": round(100 * s6["share"], 1) if s6["share"] is not None else None, "alert_at": 100 * SHARE_ALERT},
+                           "pace": {"blocks_6h": pc["blocks_6h"], "expected_6h": pc["expected_6h"],
+                                    "ratio": round(pc["ratio"], 2) if pc["ratio"] is not None else None,
+                                    "checked": pc["checked"], "alert_under": RATE_LOW, "alert_over": RATE_HIGH},
+                           "depth1_wins_24h": m["wins24"], "alert_at_wins": ORPHAN_WINS,
+                           "last_alert": int(last) if last else None}}
+    html_out = f"""
+<h2 id="risk">Reversal risk</h2>
+<p class="note"><strong>Why this is here.</strong> This page exists because one pool at or above half the hashrate can
+rewrite recent history. Short of half, a large pool can still reverse a payment: it mines a private chain from the
+moment the payment is made and releases it once it is longer than the public one, which succeeds with a probability
+set by its share and by how many blocks the public chain has added since. The table turns the largest pool's share of
+recent blocks into that probability after a given number of confirmations, using the formula from the Bitcoin
+whitepaper. It assumes the whole pool acts as one attacker, which is the operator's decision and not the hashers',
+and that no other hashrate joins in. Anyone accepting this chain's coins can read a confirmation count off it. It
+updates with every block, and the checks under it are meant to fire before a share reaches half.</p>
+<div class="cards">
+<div class="card"><div class="k">{tipped("Largest pool, 24 h", TIPS["risk_share"])}</div><div class="v">{E(l24 or "-")}<br>{f"{100 * q24:.1f}% ({n24} of {t24})" if q24 is not None else "-"}</div></div>
+<div class="card"><div class="k">{tipped("Largest pool, 3 d", TIPS["risk_share"])}</div><div class="v">{E(l3 or "-")}<br>{f"{100 * q3:.1f}% ({n3} of {t3})" if q3 is not None else "not indexed"}</div></div>
+<div class="card"><div class="k">{tipped("Confirmations", TIPS["risk_confs"])}</div><div class="v">{("none safe" if over else f"{z1} for under 1%<br>{z01} for under 0.1%")}</div></div>
+</div>
+<p class="note">{conf_line}</p>
+<div class="wrap"><table class="stack dense">
+<tr>{th("Reversal odds after", "risk_table")}{"".join(f"<th class=n>{z} confs</th>" for z in zs)}</tr>
+{table}
+</table></div>
+<p class="note"><strong>{tipped("Checks running now.", TIPS["risk_monitor"])}</strong>
+Share of the last 6 hours: {E(s6["pool"] or "-")} {f"{100 * s6['share']:.0f}% ({s6['blocks']} of {s6['of']})" if s6["share"] is not None else "-"}, alert at {int(100 * SHARE_ALERT)}%.
+Pace: {pc["blocks_6h"]} blocks in 6 hours against {pc["expected_6h"] if pc["expected_6h"] is not None else "-"} expected from the prior day{"" if pc["checked"] else " (not checked: window too short or a retarget inside it)"}, alert under {int(100 * RATE_LOW)}% or over {int(100 * RATE_HIGH)}%.
+Depth-1 reorgs won against other pools in 24 hours: {wins}, alert at {ORPHAN_WINS}.
+Last concentration alert: {tt(last) if last else "none"}. The same numbers are in <a href="risk.json">risk.json</a>.</p>
+"""
+    return html_out, feed
 
 
 def week_counts(rw, now):
@@ -1749,6 +1935,7 @@ def render_html(path, sd, st):
         week, week_total, canaries = None, 0, {}
     choose, choose_gen = choose_rows(sd, week, week_total, canaries)
     choose_html = render_choose(choose, choose_gen, E)
+    risk_html, risk_feed = render_risk(sd, st, rw if os.path.exists(rw_path) else None, E, now)
     knot = ('<svg class="mark" viewBox="0 0 773 773" width="60" height="60" role="img" aria-label="Bitcoin Knots">'
             '<circle cx="386.5" cy="386.5" r="380" fill="#f7931a"/>'
             '<circle cx="386.5" cy="386.5" r="380" fill="none" stroke="#b8651a" stroke-width="14"/>'
@@ -1901,6 +2088,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <p class="note">{tipped("Who is finding the blocks.", TIPS["pool_share"])} A pool near half the ring is the one that could reorganize the chain on its own. Click a slice or a legend entry to jump to that pool's row below.</p>
 <div class="rangebar"><label for="rangesel">Window</label> <select id="rangesel">{range_opts}</select></div>
 <div class="donutwrap">{donut_panes}</div>
+{risk_html}
 
 <h2>Recent blocks</h2>
 <p class="note">{tipped("The most recent blocks, newest first.", TIPS["recent_blocks"])} Colour marks the pool; grey is any pool outside the day's top seven.</p>
@@ -1963,6 +2151,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <li><strong>Pool names.</strong> {E(TIPS["pool"])}</li>
 <li><strong>Template built by.</strong> {E(TIPS["builder"])}</li>
 <li><strong>Coinbase payout.</strong> {E(TIPS["payout"])}</li>
+<li><strong>Reversal risk.</strong> {E(TIPS["risk_table"])} {E(TIPS["risk_monitor"])}</li>
 <li><strong>Choosing a pool.</strong> {E(TIPS["choose_trust_v1"])} {E(TIPS["choose_trust_gw"])} {E(TIPS["choose_canary"])}</li>
 <li><strong>Moved and held.</strong> {E(TIPS["moved"])} {E(TIPS["held"])}</li>
 <li><strong>Wallets.</strong> {E(TIPS["wallet"])}</li>
@@ -2123,6 +2312,13 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
         fp = os.path.join(os.path.dirname(path) or ".", "pools.json")
         with open(fp + ".tmp", "w") as f:
             json.dump(feed, f, indent=1, sort_keys=True)
+        os.replace(fp + ".tmp", fp)
+    if risk_feed:
+        risk_feed.update({"generated": int(now), "tip_height": tip_h, "source": REPO_URL,
+                          "method": {"table": TIPS["risk_table"], "confirmations": TIPS["risk_confs"], "monitoring": TIPS["risk_monitor"]}})
+        fp = os.path.join(os.path.dirname(path) or ".", "risk.json")
+        with open(fp + ".tmp", "w") as f:
+            json.dump(risk_feed, f, indent=1, sort_keys=True)
         os.replace(fp + ".tmp", fp)
 
 
@@ -2332,6 +2528,8 @@ def main():
                               int(args.sweep_btc * 1e8), args.verbose)
         except Exception as e:  # noqa: BLE001
             print(f"{ts()} reward index failed: {e}")
+
+    concentration_checks(sd, st, events, NOW)
 
     finish(sd, args, st, state_path, events)
     if args.verbose and not events:
