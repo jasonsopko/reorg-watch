@@ -173,18 +173,23 @@ so the watcher saw a depth-2 reorg against the live chain:
 
 ## Status page
 
-`--html FILE` writes a self-contained page after every run: node and explorer
-status, the block tree, blocks by pool for the last 24 hours with an hourly
-breakdown, reward flow and blocks by wallet, latest blocks, recent reward
-movements, and recent events. Every column header and every classification
-says how it was determined on hover or focus, and a "How this page decides"
-section at the bottom repeats the method in plain text for readers on phones.
+`--html FILE` writes a self-contained page after every run, split into five
+tabs. Reorgs, the tab the page opens on: node and explorer status, the block
+tree, reversal risk and recent events. Pool share: the share ring, the strip
+of recent blocks, blocks by pool for the last 24 hours with an hourly
+breakdown, and blocks by wallet. Rewards: reward flow since the fork, latest
+blocks and recent reward movements. Choosing a pool: the hasher-facing table
+and the endpoint survey. Method: how every column was decided, in plain text
+for readers on phones; every column header and classification also says so
+on hover or focus. The tabs are plain anchors, so a link to any section or
+pool row opens the tab that holds it, and without JavaScript the sections
+follow one another down the page as before.
 Tables never scroll sideways: they use fixed layout with wrapping, and below
 about 700px each row reflows into labeled lines. One file, no external
 assets. Serve it from wherever you already serve static files.
 
-The page opens with a strip of the most recent blocks and a donut of the last
-24 hours of pool share, both in the mempool.space idiom. One colour set,
+The Pool share tab has a strip of the most recent blocks and a donut of pool
+share over a window you pick, both in the mempool.space idiom. One colour set,
 assigned to the day's top seven pools in a fixed order and reused by the strip
 and the ring, so a pool reads the same in both; everyone else is grey. The
 colours were checked with the data-viz validator for colourblind separation

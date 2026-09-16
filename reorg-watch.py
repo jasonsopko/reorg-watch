@@ -945,6 +945,9 @@ TIPS = {
     "level": "INFO is logged. ALERT is logged and emailed.",
     "event": "Reorgs name the pools on both sides. Explorer and node events say which check failed and for how many consecutive runs.",
 }
+# The page's tabs, in order. The first is the one it opens on.
+TABS = [("reorgs", "Reorgs"), ("share", "Pool share"), ("rewards", "Rewards"), ("choose", "Choosing a pool"), ("method", "Method")]
+
 CLASS_TIPS = {
     "D": "Unique-id push of 7 or more bytes: the gateway that built this template had a DATUM pool upstream, so the pool could not choose the transactions. That gateway is normally the miner's own; a pool's public stratum port served by the pool's own gateway looks the same, and then the pool's node built the block.",
     "G": "Unique-id push of 3 bytes: the DATUM gateway running standalone, serving stratum v1. The node of whoever owns the payout address built this template.",
@@ -2003,6 +2006,9 @@ def render_html(path, sd, st):
             '<circle cx="386.5" cy="386.5" r="380" fill="none" stroke="#b8651a" stroke-width="14"/>'
             '<g transform="translate(108 108) scale(0.72) translate(-144 -122)" fill="#2d4b25" stroke="#7cb342" stroke-width="9" stroke-linejoin="round">'
             + "".join(f'<path d="{d}"/>' for d in KNOTS_PATHS) + '</g></svg>')
+    nav = '<nav class="tabs" aria-label="Sections"><ul>' + "".join(f'<li><a href="#{k}">{v}</a></li>' for k, v in TABS) + '</ul></nav>'
+    tab_css = ", ".join(f'html[data-tab="{k}"] #{k}' for k, _ in TABS) + " { display: block; }"
+    tab_ids = ", ".join(f"{k}: 1" for k, _ in TABS)
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2030,7 +2036,7 @@ html {{ font-size: 17.5px; }}
 * {{ box-sizing: border-box; }}
 body {{ margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 Manjari, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
 a {{ color: var(--link); text-decoration: none; }} a:hover {{ text-decoration: underline; }}
-header {{ border-bottom: 6px solid var(--orange); background: var(--band); color: var(--band-ink); }}
+header {{ background: var(--band); color: var(--band-ink); }}
 .bar {{ max-width: 88rem; margin: 0 auto; padding: 1.4rem 1.25rem 1.1rem; display: flex; align-items: center; gap: 1rem; }}
 .mark {{ flex: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }}
 h1 {{ margin: 0; font: 700 1.55rem/1.15 "Martel Sans", Georgia, "Times New Roman", serif; letter-spacing: -.01em; }}
@@ -2066,6 +2072,15 @@ td [data-tip] {{ border-bottom: 1px dotted var(--rule); }}
 [data-tip]:hover::after, [data-tip]:focus::after {{ content: attr(data-tip); position: absolute; left: 0; top: calc(100% + .35rem); z-index: 9; width: 20rem; max-width: 80vw; white-space: normal; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .85rem; line-height: 1.45; color: var(--ink); background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .5rem .7rem; box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }}
 th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hover::after, td.n [data-tip]:focus::after {{ left: auto; right: 0; }}
 .how li {{ margin: .3rem 0; }}
+.tabs {{ position: sticky; top: 0; z-index: 5; background: var(--band); border-bottom: 5px solid var(--orange); box-shadow: 0 2px 6px rgba(0, 0, 0, .25); }}
+.tabs ul {{ list-style: none; margin: 0 auto; padding: .5rem 1.25rem 0; max-width: 88rem; display: flex; gap: .4rem; align-items: flex-end; overflow-x: auto; scrollbar-width: none; }}
+.tabs ul::-webkit-scrollbar {{ display: none; }}
+.tabs a {{ display: block; padding: .6rem 1.2rem .55rem; white-space: nowrap; color: var(--band-ink); font: 700 1.05rem/1.2 "Martel Sans", Georgia, "Times New Roman", serif; background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .28); border-bottom: 0; border-radius: 9px 9px 0 0; }}
+.tabs a:hover {{ background: rgba(255, 255, 255, .2); text-decoration: none; }}
+.tabs a[aria-current] {{ background: var(--paper); color: var(--green); border-color: var(--orange); border-top-width: 4px; padding-top: calc(.6rem - 3px); }}
+html.js section.tab {{ display: none; }}
+{tab_css}
+[id] {{ scroll-margin-top: 3.6rem; }}
 .donutwrap {{ background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 1rem; }}
 .donutpane {{ display: flex; flex-wrap: wrap; gap: 1rem 1.6rem; align-items: center; }}
 .donutpane[hidden] {{ display: none; }}
@@ -2083,7 +2098,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 .legend a.lnk {{ color: inherit; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
 .legend a.lnk:hover {{ text-decoration: underline; }}
 .donut a {{ cursor: pointer; }}
-.prow {{ scroll-margin-top: 1rem; transition: background .3s; }}
+.prow {{ scroll-margin-top: 3.6rem; transition: background .3s; }}
 .prow:target {{ background: var(--orange-tint); }}
 .blocks {{ display: flex; flex-wrap: wrap; gap: .5rem; }}
 .blk {{ width: 98px; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); overflow: hidden; }}
@@ -2114,6 +2129,8 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
   table.stack td[colspan]::before, table.stack td:not([data-l])::before {{ content: ""; }}
   table.hours {{ font-size: .85rem; }}
   [data-tip]:hover::after, [data-tip]:focus::after {{ left: 0; right: auto; }}
+  .tabs a {{ padding: .5rem .8rem .45rem; font-size: .95rem; }}
+  .tabs a[aria-current] {{ padding-top: calc(.5rem - 3px); }}
 }}
 .forkscroll{{overflow-x:auto;padding:4px 0 2px}}
 .forksvg{{height:auto;display:block}}
@@ -2131,11 +2148,28 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 </style>
 </head>
 <body>
+<script nonce="NONCE">
+(function () {{
+  // Pick the tab before the body renders so the page never flashes every section. A hash
+  // naming a section or a pool row inside a tab opens that tab; anything else opens the first.
+  var tabs = {{{tab_ids}}}, inner = {{pools: "choose", risk: "reorgs"}};
+  var h = (location.hash || "").slice(1);
+  var t = tabs[h] ? h : (inner[h] || (h.indexOf("pool-") === 0 ? "share" : "{TABS[0][0]}"));
+  document.documentElement.className += " js";
+  document.documentElement.setAttribute("data-tab", t);
+  window.addEventListener("hashchange", function () {{
+    var k = (location.hash || "").slice(1);
+    if (tabs[k]) document.documentElement.setAttribute("data-tab", k);
+  }});
+}})();
+</script>
 <header><div class="bar">{knot}<div><h1>Bitcoin Knots reorg watch</h1>
 <p class="sub">Chain reorganizations and pool shares on the BLAKE2b chain, from one Bitcoin Knots node. Generated {tt(now)}. Times are shown in your browser's time zone, <span class="tzname">{E(tsz(now, "%Z"))}</span> right now.</p></div></div></header>
+{nav}
 <main>
 <div id="stale">This page is more than 15 minutes old. The generator or the upload has stopped; treat everything below as stale.</div>
 
+<section class="tab" id="reorgs">
 <div class="cards">
 <div class="card"><div class="k">{tipped("Node", TIPS["node"])}</div><div class="v {node_state[0]}">{E(node_state[1])}</div></div>
 <div class="card"><div class="k">{tipped("Explorer", TIPS["explorer"])}</div><div class="v {agree[0]}">{ex_link if ex else ""} {E(agree[1])}</div></div>
@@ -2144,32 +2178,45 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <div class="card"><div class="k">{tipped("Last alert", TIPS["last_alert"])}</div><div class="v">{last_alert}</div></div>
 <div class="card"><div class="k">{tipped("Tip", TIPS["tip"])}</div><div class="v">{tip_h}<br>{tip_html}</div></div>
 </div>
-
 {forks_html}
+{risk_html}
+<h2>Recent events</h2>
+<p class="note">Depth-1 reorgs are ordinary ties between two blocks found seconds apart. Depth 2 and deeper, explorer disagreement, and a node that has fallen behind are alerts.</p>
+<div class="wrap"><table class="stack">
+<tr>{th("Time", "time", width="20%")}{th("Level", "level", width="10%")}{th("Event", "event")}</tr>
+{rows_events()}
+</table></div>
+</section>
+
+<section class="tab" id="share">
 <h2>Pool share, <span id="rangelabel">last 1 hour</span></h2>
 <p class="note">{tipped("Who is finding the blocks.", TIPS["pool_share"])} A pool near half the ring is the one that could reorganize the chain on its own. Click a slice or a legend entry to jump to that pool's row below.</p>
 <div class="rangebar"><label for="rangesel">Window</label> <select id="rangesel">{range_opts}</select></div>
 <div class="donutwrap">{donut_panes}</div>
-{risk_html}
-
 <h2>Recent blocks</h2>
 <p class="note">{tipped("The most recent blocks, newest first.", TIPS["recent_blocks"])} Colour marks the pool; grey is any pool outside the day's top seven.</p>
 {strip_html}
-
 <h2>Blocks by pool, last 24 hours</h2>
 <p class="note">{len(day)} blocks. Pools are named from the coinbase payout address, then the coinbase tag, using <a href="{POOLS_REPO}">Kilombino's pool list</a>. Both are chosen by the miner, so treat names as claims. Shares are block counts and carry a few points of noise.</p>
 <div class="wrap"><table class="stack">
 <tr>{th("Pool", "pool", width="34%")}{th("Blocks", "blocks24", "n", "14%")}{th("Share", "share24", "n", "14%")}{th("Template built by", "builder")}</tr>
 {rows_shares()}
 </table></div>
-
 <h2>By hour, <span class="tzname">{E(tsz(now, "%Z"))}</span></h2>
 <p class="note">Most recent hour first. Share of that hour's blocks for the three largest pools of the day. Cells at or above half are marked.</p>
 <div class="wrap"><table class="hours">
 <tr>{th("Hour", "hour")}{th("Blocks", "blocks24", "n")}{hour_heads}</tr>
 {rows_hours()}
 </table></div>
+<h2>Blocks by wallet</h2>
+<p class="note">Labels merged when they pay the same pool address or their pool addresses are spent together. This is the label-independent view: what one operator's wallet actually collected. {overlap_text}</p>
+<div class="wrap"><table class="stack">
+<tr>{th("Wallet", "wallet", width="18%")}{th("Other labels in this wallet", "wallet_labels")}{th("Blocks 24 h", "wallet24", "n", "11%")}{th("Share 24 h", "share24", "n", "11%")}{th("Since fork", "wallet_fork", "n", "11%")}{th("Share", "wallet_fork", "n", "11%")}</tr>
+{wallet_rows or "<tr><td colspan=6 class=note>none</td></tr>"}
+</table></div>
+</section>
 
+<section class="tab" id="rewards">
 <h2>Reward flow since the fork</h2>
 <p class="note">{rw_note or "Reward index disabled."}</p>
 <div class="wrap"><table class="stack wide dense">
@@ -2177,35 +2224,25 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 {reward_rows or "<tr><td colspan=10 class=note>none</td></tr>"}
 </table></div>
 <p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: a gateway with a DATUM pool upstream built the block and the pool only set the payout; that gateway is normally the miner's own, though a pool's public stratum port served by the pool's own gateway looks the same. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block, read from the coinbases: <em>paid to miners in the coinbase</em> (three or more outputs), <em>paid to the finder in the coinbase</em> (one or two outputs, to a different address each block), or <em>held by the pool, paid later</em> (one or two outputs, most of the value to one address; earlier versions of this page called this pool custody). Hover or tap a cell for the numbers behind it.</p>
-
-{choose_html}
-{survey_html}
 <h2>Latest blocks</h2>
 <div class="wrap"><table class="stack wide dense">
 <tr>{th("Height", "height", "n")}{th("Time", "time")}{th("Pool", "pool")}{th("Template built by", "builder")}{th("Coinbase tags", "tags")}{th("Header", "hdr")}{th("Txs", "txs", "n")}{th("Outputs", "outputs", "n")}{th("Reward BTC", "reward", "n")}{th("Fees BTC", "fees", "n")}</tr>
 {block_rows or "<tr><td colspan=9 class=note>none</td></tr>"}
 </table></div>
-
-<h2>Blocks by wallet</h2>
-<p class="note">Labels merged when they pay the same pool address or their pool addresses are spent together. This is the label-independent view: what one operator's wallet actually collected. {overlap_text}</p>
-<div class="wrap"><table class="stack">
-<tr>{th("Wallet", "wallet", width="18%")}{th("Other labels in this wallet", "wallet_labels")}{th("Blocks 24 h", "wallet24", "n", "11%")}{th("Share 24 h", "share24", "n", "11%")}{th("Since fork", "wallet_fork", "n", "11%")}{th("Share", "wallet_fork", "n", "11%")}</tr>
-{wallet_rows or "<tr><td colspan=6 class=note>none</td></tr>"}
-</table></div>
-
 <h2>Recent reward movements</h2>
 <p class="note">Latest transactions spending coinbase outputs. Payout means three or more outputs, sweep means several rewards into one or two outputs, transfer means one reward to one or two outputs.</p>
 <div class="wrap"><table class="stack">
 <tr>{th("Time", "time", width="17%")}{th("Height", "height", "n", "9%")}{th("Pool (BTC)", "mv_pool")}{th("BTC", "mv_btc", "n", "10%")}{th("Rewards in", "mv_in", "n", "10%")}{th("Outputs", "mv_out", "n", "9%")}{th("Shape", "shape", width="11%")}</tr>
 {move_rows or "<tr><td colspan=7 class=note>none yet</td></tr>"}
 </table></div>
+</section>
 
-<h2>Recent events</h2>
-<p class="note">Depth-1 reorgs are ordinary ties between two blocks found seconds apart. Depth 2 and deeper, explorer disagreement, and a node that has fallen behind are alerts.</p>
-<div class="wrap"><table class="stack">
-<tr>{th("Time", "time", width="20%")}{th("Level", "level", width="10%")}{th("Event", "event")}</tr>
-{rows_events()}
-</table></div>
+<section class="tab" id="choose">
+{choose_html}
+{survey_html}
+</section>
+
+<section class="tab" id="method">
 <h2>How this page decides</h2>
 <ul class="how">
 <li><strong>Reorgs.</strong> {E(TIPS["reorgs"])}</li>
@@ -2221,8 +2258,47 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <li><strong>Header fields.</strong> {E(TIPS["hdr"])}</li>
 <li><strong>Alerts.</strong> {E(TIPS["last_alert"])}</li>
 </ul>
+</section>
+
 </main>
 <footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. One node's view, cross-checked once a minute against {ex_link}, whose explorer also has the block-by-block detail. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.</footer>
+<script nonce="NONCE">
+(function () {{
+  // Tabs. Without JavaScript every section is on the page in order; with it, one at a time,
+  // chosen by the URL hash so a link to any section or pool row still lands on it.
+  var tabLinks = document.querySelectorAll('.tabs a');
+  var tabOf = function (id) {{
+    var el = id ? document.getElementById(id) : null;
+    while (el && el !== document.body) {{
+      if (el.tagName === 'SECTION' && (' ' + el.className + ' ').indexOf(' tab ') >= 0) return el.id;
+      el = el.parentNode;
+    }}
+    return null;
+  }};
+  var showTab = function (id) {{
+    document.documentElement.setAttribute('data-tab', id);
+    for (var q = 0; q < tabLinks.length; q++) {{
+      if (tabLinks[q].getAttribute('href') === '#' + id) tabLinks[q].setAttribute('aria-current', 'page');
+      else tabLinks[q].removeAttribute('aria-current');
+    }}
+  }};
+  var fromHash = function () {{
+    var id = (location.hash || '').slice(1), t = tabOf(id) || '{TABS[0][0]}';
+    showTab(t);
+    if (id && id !== t) {{ var target = document.getElementById(id); if (target) target.scrollIntoView(); }}
+  }};
+  var nav = document.querySelector('.tabs');
+  for (var w = 0; w < tabLinks.length; w++) tabLinks[w].addEventListener('click', function (ev) {{
+    var id = this.getAttribute('href').slice(1);
+    ev.preventDefault();
+    showTab(id);
+    try {{ history.replaceState(null, '', '#' + id); }} catch (e) {{ location.hash = id; }}
+    if (nav && window.pageYOffset > nav.offsetTop) window.scrollTo(0, nav.offsetTop);
+  }});
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+}})();
+</script>
 <script nonce="NONCE">
 (function () {{
   var gen = 1000 * parseInt(document.querySelector('.sub time[data-epoch]').getAttribute('data-epoch'), 10);
@@ -2311,7 +2387,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
     // give-up path uses a key nobody else shares, so a still-stale page is never cached
     // under the new height. replace() keeps these out of the history.
     var tries = 0;
-    var go = function (key) {{ location.replace(location.pathname + "?b=" + key); }};
+    var go = function (key) {{ location.replace(location.pathname + "?b=" + key + location.hash); }};
     (function confirm() {{
       fetch("tip.json?t=" + Date.now(), {{cache: "no-store"}})
         .then(function (r) {{ return r.ok ? r.json() : null; }})
