@@ -1082,7 +1082,7 @@ STATUS_COLOR = {"active": "#5fbf2f", "valid-fork": "#2fb6c8", "valid-headers": "
                 "headers-only": "#d8912a", "invalid": "#cc4444"}
 
 
-def fork_dag(branches, active, colormap, peers_at_tip, E, recent, keep=4):
+def fork_dag(branches, active, colormap, peers_at_tip, E, recent, keep=4, explorer=""):
     """The block tree. The kept chain runs along the top and carries on to the tip; a branch
     that lost sits below the height it contested and dead-ends there. Long uncontested runs
     collapse so the interesting parts sit together, and the most recent blocks are drawn
@@ -1155,6 +1155,8 @@ def fork_dag(branches, active, colormap, peers_at_tip, E, recent, keep=4):
              f'<text x="{bx+BW/2}" y="{by+BH/2+7}" class="fh" text-anchor="middle">{blk["height"]}</text>'
              f'</g>'
              f'<text x="{bx+BW/2}" y="{by+BH+20}" class="fp" text-anchor="middle">{E(blk["pool"][:17])}</text>')
+        if explorer and blk.get("hash"):
+            g = f'<a href="{E(explorer)}/block/{E(blk["hash"])}" target="_blank" rel="noopener">{g}</a>'
         if dead:
             # the branch stops here: a stub running the way the chain grows, ending in a cross
             sx, sy = bx - 4, by + BH / 2
@@ -1283,6 +1285,9 @@ def render_forks(sd, E, colormap, st):
                 f'than the one this node is building on has appeared since the fork block. '
                 f'Checked {gen}.</p>\n')
 
+    explorer = (st.get("explorer_url") or "").rstrip("/")
+    ex_name = re.sub(r"^https?://", "", explorer)
+    click = f" Click a block to open it on {E(ex_name)}." if explorer else ""
     lost_by = {}
     for br in branches:
         for blk in br["lost"]:
@@ -1298,9 +1303,9 @@ def render_forks(sd, E, colormap, st):
             f'resolved in a single block and never became a reorg, which is why the reorg counters above '
             f'read zero. The kept chain runs along the top and carries on; a branch that lost stops at '
             f'the height it contested, marked with a cross. The right-hand end is the live chain, one '
-            f'box per block, so a new fork would appear there first. Checked {gen}.</p>'
+            f'box per block, so a new fork would appear there first.{click} Checked {gen}.</p>'
             f'<p class="note">{legend}</p>'
-            f'{fork_dag(branches, active, colormap, at_tip, E, recent)}'
+            f'{fork_dag(branches, active, colormap, at_tip, E, recent, explorer=explorer)}'
             f'<div class="wrap"><table class="stack">'
             f'<tr><th>Pool whose block was discarded</th><th class=n>Times</th></tr>{rows}</table></div>\n')
 
@@ -1816,7 +1821,7 @@ def render_html(path, sd, st):
     ex = st.get("explorer_url") or ""
     ex_name = urllib.parse.urlparse(ex).hostname or "explorer"
     ex_link = f'<a href="{E(ex)}">{E(ex_name)}</a>' if ex else "explorer"
-    tip_html = f'<a href="{E(ex)}/block/{E(tip_hash)}"><code>{E(tip_hash)}</code></a>' if ex else f"<code>{E(tip_hash)}</code>"
+    tip_html = f'<a href="{E(ex)}/block/{E(tip_hash)}" target="_blank" rel="noopener"><code>{E(tip_hash)}</code></a>' if ex else f"<code>{E(tip_hash)}</code>"
     etip = st.get("explorer_tip")
     if etip is None:
         agree = ("unknown", "explorer not checked")
@@ -1874,6 +1879,22 @@ def render_html(path, sd, st):
             out.append(f"<tr><td>{label}</td><td class=n>{r['n']}</td>{''.join(cells)}</tr>")
         return "\n".join(out)
 
+    def block_link(h, hsh):
+        if ex and isinstance(hsh, str) and re.fullmatch(r"[0-9a-f]{64}", hsh):
+            return f'<a href="{E(ex)}/block/{hsh}" target="_blank" rel="noopener">{h}</a>'
+        return E(str(h))
+
+    def event_links(e):
+        """Blocks named by an event, as links to the explorer: both sides of a reorg, the
+        explorer's block on a mismatch."""
+        if e["type"] == "reorg":
+            kept = ", ".join(block_link(b.get("height", "?"), b.get("hash")) for b in e.get("new", []) if isinstance(b, dict))
+            stale = ", ".join(block_link(b.get("height", "?"), b.get("hash")) for b in e.get("old", []) if isinstance(b, dict))
+            return f'<br><span class=note>kept {kept or "-"} &middot; stale {stale or "-"}</span>'
+        if e["type"] == "explorer_mismatch" and e.get("explorer_hash"):
+            return f'<br><span class=note>explorer block {block_link(e["height"], e["explorer_hash"])}</span>'
+        return ""
+
     def rows_events():
         out = []
         for e in evs[-25:][::-1]:
@@ -1881,7 +1902,7 @@ def render_html(path, sd, st):
             lvl = e.get("level", "INFO")
             if line.startswith(lvl + " "):
                 line = line[len(lvl) + 1:]
-            out.append(f"<tr><td class=t>{tt(e['_t'], 'minute')}</td><td class={'alert' if lvl == 'ALERT' else 'info'}>{lvl}</td><td>{E(line)}</td></tr>")
+            out.append(f"<tr><td class=t>{tt(e['_t'], 'minute')}</td><td class={'alert' if lvl == 'ALERT' else 'info'}>{lvl}</td><td>{E(line)}{event_links(e)}</td></tr>")
         return "\n".join(out) or "<tr><td colspan=3 class=note>none yet</td></tr>"
 
     hour_heads = "".join(f"<th class=n>{E(c)}</th>" for c in cols)
@@ -2143,6 +2164,9 @@ html.js section.tab {{ display: none; }}
 .forksvg .fdash{{stroke-dasharray:6 5}}
 .forksvg .fdead{{stroke-dasharray:4 3}}
 .forksvg .fx{{stroke:var(--bad);stroke-width:2.5;stroke-linecap:round}}
+.forksvg a{{cursor:pointer}}
+.forksvg a:hover rect,.forksvg a:focus rect{{stroke:var(--orange);stroke-width:3}}
+.forksvg a:hover .fp{{text-decoration:underline}}
 
 .fkey{{display:inline-block;padding:1px 6px;margin-right:6px;border-radius:3px;font:600 10px system-ui;color:#08120a}}
 </style>

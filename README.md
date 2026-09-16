@@ -206,7 +206,8 @@ a branch that lost sits below the height it contested and dead-ends there
 with a cross. Long uncontested runs collapse so the contested parts sit
 together, and the most recent blocks are drawn one at a time, which is where
 a new fork shows up first. The newest block is on the left, so a block's
-parent is the column to its right. A branch deeper than one block is drawn
+parent is the column to its right. Every block links to its page on the
+explorer the watcher cross-checks against. A branch deeper than one block is drawn
 as a chain of its own: only its oldest block hangs off the common ancestor,
 and only its tip carries the status badge and the cross.
 
