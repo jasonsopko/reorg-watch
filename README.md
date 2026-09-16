@@ -139,6 +139,7 @@ Everything lives in `~/.reorg-watch/` (change with `--state`):
 - `reorg-log.md`: the human-readable log, written to be published as is.
   Heights, hashes, pool names, timestamps. No local paths.
 - `events.jsonl`: one JSON object per event, for scripts.
+- `pools.json`: next to the page, the "Choosing a pool" rows with their method text.
 - `state.json`: the saved window, one attribution record per block, and counters.
 - `rewards.json`: every coinbase output since the fork and every transaction that spent one.
 - `pools-v2.json`: cached pool list, refreshed every six hours.
@@ -205,6 +206,43 @@ It needs `chain-tips.json` in the state directory, from a separate
 endpoint survey needs `pool-survey.json`, and the peer agreement panel needs
 `peer-crawl.json`. A missing file renders nothing and leaves the rest of the
 page alone.
+
+### Choosing a pool
+
+A table for someone deciding where to point a miner, built from
+`pool-survey.json` and the coinbase index. Every pool can be reached two
+ways, and the table says what each path hands the pool:
+
+- **Public stratum v1 port.** The pool's node builds the block, always, so
+  the hasher gives up the choice of transactions. Whether the pool also
+  holds the reward is measured from its coinbases: one or two outputs with
+  most of the value on one script means the reward is held and paid later,
+  three or more means it is paid in the coinbase.
+- **Own DATUM gateway.** The miner's node builds the block and the pool only
+  sets the coinbase outputs. "Neither" means the block is the miner's and the
+  reward arrives in the coinbase.
+
+Fees are what each pool's own site says. The survey passes them through from
+a `terms` object on each pool: `sv1_fee`, `datum_fee`, `payout`, with
+`source` and `checked` (the date the page was read). They are self-reported
+and the page says so.
+
+A pool's actual payout behavior can be measured by pointing a small miner
+of your own at it. List those in `canaries.json` in the state directory:
+
+```json
+[{"address_spk": "0014...", "pool": "Lazarus", "path": "sv1",
+  "from": 1789500000, "to": null, "note": "Goldshell, one day"}]
+```
+
+`address_spk` is the hex scriptPubKey of a fresh address used for that
+pool and path only. From then on every spend of that pool's coinbases is
+checked against the list as it is indexed, and the table reports "paid in
+the coinbase", "paid later, from the pool's coinbase", or "waiting", with
+the height. The address itself is never rendered or published.
+
+The same rows are written next to the page as `pools.json`, with the method
+text, for other sites to use.
 
 ### Reloading
 

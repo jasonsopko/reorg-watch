@@ -467,8 +467,17 @@ def named(label):
     return not (label.startswith("Solo ") or label.lower().startswith("unknown") or label.lower().startswith("solo"))
 
 
+def canary_scripts(sd):
+    """Hex scriptPubKeys of our canary miners, from canaries.json in the state directory."""
+    try:
+        return {(k.get("address_spk") or "").lower() for k in json.load(open(os.path.join(sd, "canaries.json")))} - {""}
+    except Exception:
+        return set()
+
+
 class Rewards:
     def __init__(self, sd):
+        self.canary_spks = canary_scripts(sd)
         self.path = os.path.join(sd, "rewards.json")
         self.d = {"version": 7, "scanned_to": None, "coinbases": {}, "spends": [], "overlaps": []}
         if os.path.exists(self.path):
@@ -523,9 +532,14 @@ class Rewards:
                     ins.append(a or f"prefork:{p[:12]}")
             outs = sorted((v for v, _ in tx["vout"] if v > 0), reverse=True)
             kind = "payout" if len(outs) >= 3 else ("sweep" if len(hit) >= 2 else "transfer")
-            self.d["spends"].append({"h": height, "t": t, "txid": tx["txid"], "n_cb": len(hit), "cb_sats": cb_sats,
-                                     "labels": labels, "ins": sorted(set(ins)), "n_in": len(tx["vin"]),
-                                     "n_out": len(outs), "out_max": outs[0] if outs else 0, "kind": kind})
+            rec = {"h": height, "t": t, "txid": tx["txid"], "n_cb": len(hit), "cb_sats": cb_sats,
+                   "labels": labels, "ins": sorted(set(ins)), "n_in": len(tx["vin"]),
+                   "n_out": len(outs), "out_max": outs[0] if outs else 0, "kind": kind}
+            # Only our own canary scripts are kept per spend, so the index stays small.
+            hits = sorted({spk.hex() for v, spk in tx["vout"] if v > 0 and spk.hex() in self.canary_spks})
+            if hits:
+                rec["hits"] = hits
+            self.d["spends"].append(rec)
         self.d["scanned_to"] = height
 
     def sync(self, rest, pools, chain, blocks_meta, top, ancestor, floor, sweep_sats, verbose):
@@ -861,6 +875,14 @@ TIPS = {
     "mv_in": "Number of coinbase outputs consumed.",
     "mv_out": "Number of value-bearing outputs.",
     "shape": "Payout has 3 or more outputs, sweep gathers several rewards into 1 or 2 outputs, transfer moves one reward to 1 or 2 outputs.",
+    "choose_share": "This pool's blocks divided by all blocks in the last 7 days by header time.",
+    "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
+    "choose_datum": "Whether a DATUM service was found: yes when a pool pubkey and endpoint are published, or the endpoint alone, or documented on the site. The fee is what the pool's site says, read on the date in pools.json.",
+    "choose_sv1": "Public stratum v1 endpoints that answered a probe. The fee is what the pool's site says, read on the date in pools.json.",
+    "choose_paid": "Measured from this pool's coinbases over the survey window: the median number of value-bearing outputs and the share of all value paid to the single most-paid script. One or two outputs with most of the value on one script means the pool holds the reward and pays later.",
+    "choose_trust_v1": "On a public stratum v1 port the pool's node always builds the block, so you hand it the choice of transactions. Whether it also holds your reward is the measured payout column.",
+    "choose_trust_gw": "With your own DATUM gateway your node builds the block and the pool only sets the coinbase outputs. Neither means the block is yours and the reward reaches you in the coinbase. You still rely on the pool's share accounting, which you can check in every block.",
+    "choose_canary": "A canary is a small miner of ours pointed at the pool with a fresh address, on the path named. Paid in the coinbase means our address appeared in one of the pool's coinbases. Paid later means a transaction spending the pool's coinbase paid it. Waiting means no payment has been seen yet.",
     "level": "INFO is logged. ALERT is logged and emailed.",
     "event": "Reorgs name the pools on both sides. Explorer and node events say which check failed and for how many consecutive runs.",
 }
@@ -1293,6 +1315,217 @@ DATUM payout script is not the script its blocks actually pay.</p>
 """
 
 
+def week_counts(rw, now):
+    """Blocks per label in the last 7 days by header time, and the total."""
+    week = {}
+    for c in rw.d["coinbases"].values():
+        if now - c["t"] <= 7 * 86400:
+            week[c["label"]] = week.get(c["label"], 0) + 1
+    return week, sum(week.values())
+
+
+DATUM_SHORT = (
+    ("yes", "yes"),
+    ("endpoint published", "endpoint published, no pubkey"),
+    ("DATUM mining documented", "documented, no host published"),
+    ("no DATUM", "none offered"),
+)
+DATUM_AVAILABLE = ("yes", "endpoint published, no pubkey", "documented, no host published")
+
+
+def canary_results(sd, rw):
+    """What happened to each canary address, keyed by (pool, path).
+
+    canaries.json in the state directory lists our own small miners, one fresh address
+    each: [{"address_spk": <hex scriptPubKey>, "pool": <label>, "path": "sv1"|"datum",
+    "from": <unix time>, "to": <unix time or null>, "note": ""}]. The address itself is
+    never rendered. A canary is paid in the coinbase when its script appears in one of the
+    pool's coinbases after it started, and paid later when a transaction that spent the
+    pool's coinbase paid it; the reward index records both."""
+    try:
+        canaries = json.load(open(os.path.join(sd, "canaries.json")))
+    except Exception:
+        return {}
+    res = {}
+    for k in canaries:
+        spk = (k.get("address_spk") or "").lower()
+        if not spk or not k.get("pool"):
+            continue
+        key = (k["pool"], k.get("path", "sv1"))
+        start, end = k.get("from") or 0, k.get("to")
+        hit = None
+        for c in rw.d["coinbases"].values():
+            if c["label"] != k["pool"] or c["t"] < start:
+                continue
+            if any(o[0].lower() == spk for o in c["outs"].values()):
+                if hit is None or c["h"] < hit["h"]:
+                    hit = {"how": "paid in the coinbase", "h": c["h"], "t": c["t"]}
+        if hit is None:
+            for x in rw.d["spends"]:
+                if x["t"] < start or k["pool"] not in x.get("labels", {}):
+                    continue
+                if spk in x.get("hits", []):
+                    if hit is None or x["h"] < hit["h"]:
+                        hit = {"how": "paid later, from the pool's coinbase", "h": x["h"], "t": x["t"]}
+        pool_blocks = sum(1 for c in rw.d["coinbases"].values()
+                          if c["label"] == k["pool"] and c["t"] >= start and (end is None or c["t"] <= end))
+        res[key] = {"path": k.get("path", "sv1"), "from": start, "to": end, "pool_blocks_since": pool_blocks,
+                    "result": hit["how"] if hit else "waiting", "height": hit["h"] if hit else None,
+                    "note": k.get("note", "")}
+    return res
+
+
+def choose_rows(sd, week, week_total, canaries):
+    """One record per public pool: what its sv1 port and DATUM service cost, how the reward
+    leaves its blocks, and what a hasher hands over on each path. Feeds both the
+    "Choosing a pool" table and pools.json. Empty when pool-survey.json is absent."""
+    try:
+        sv = json.load(open(os.path.join(sd, "pool-survey.json")))
+    except Exception:
+        return [], None
+    rows = []
+    for r in sv.get("pools", []):
+        if r.get("kind", "pool") != "pool":
+            continue
+        oc = r.get("onchain") or {}
+        eps = r.get("endpoints", [])
+        probed = [e for e in eps if e.get("probed_at")]
+        if not probed and (oc.get("share_pct") or 0) < 1:
+            continue
+        terms = r.get("terms") or {}
+        label = r["label"]
+        n7 = week.get(label, 0) if week is not None and oc else None
+        med, dom = oc.get("median_outputs"), oc.get("dominant_script_pct")
+        if med is None:
+            custody, paid = None, "no blocks attributed"
+        elif med <= 1 and dom is not None and dom < 50:
+            custody, paid = False, f"one output per block to different scripts, {dom:.0f}% to the largest: the finder is paid"
+        elif med <= 2 and (dom is None or dom >= 50):
+            custody = True
+            paid = f"held by the pool and paid later: {med} output{'s' if med != 1 else ''}"
+            if dom is not None:
+                paid += f", {dom:.0f}% of the value to one script"
+        elif med <= 2:
+            custody, paid = False, f"split in the coinbase: {med} outputs, {dom:.0f}% to the largest"
+        else:
+            custody, paid = False, f"in the coinbase: median {med} outputs"
+        v1 = [e["endpoint"] for e in probed if e.get("verdict") == "stratum-v1"]
+        v1_listed = any(e.get("expect") == "stratum-v1" for e in eps)
+        dstat = r.get("datum") or ""
+        dshort = next((short for k, short in DATUM_SHORT if dstat.startswith(k)), "not found")
+        datum_ok = dshort in DATUM_AVAILABLE
+        if v1:
+            trust_v1 = "the block and your reward" if custody else ("the block" if custody is False else "the block, reward not measured")
+        else:
+            trust_v1 = None
+        if datum_ok:
+            trust_gw = "your reward" if custody else ("neither" if custody is False else "not measured")
+        else:
+            trust_gw = None
+        rows.append({
+            "pool": label, "link": r.get("link", ""),
+            "blocks_7d": n7,
+            "share_7d_pct": round(100 * n7 / week_total, 1) if n7 is not None and week_total else None,
+            "blocks_per_day": round(n7 / 7, 1) if n7 is not None else None,
+            "share_window_pct": oc.get("share_pct"), "class_mix": oc.get("class_mix"),
+            "template_builder": oc.get("class_majority"),
+            "payout": {"median_outputs": med, "dominant_script_pct": dom, "custody": custody, "text": paid},
+            "sv1": {"endpoints": v1, "listed": v1_listed, "fee": terms.get("sv1_fee", "")},
+            "datum": {"status": dshort, "detail": dstat, "fee": terms.get("datum_fee", "")},
+            "trust": {"sv1_port": trust_v1, "own_gateway": trust_gw},
+            "datum_offered": datum_ok,
+            "canary": {path: canaries[(label, path)] for path in ("sv1", "datum") if (label, path) in canaries},
+            "terms": terms,
+            "consistency": r.get("consistency", "-"),
+            "last_probed": max((e["probed_at"] for e in probed), default=None),
+        })
+    # Pools that offer DATUM first, largest first within each group: the recommendation
+    # is to run your own gateway, and a bigger DATUM pool pays more often.
+    rows.sort(key=lambda x: (not x["datum_offered"], -(x["blocks_7d"] or 0), -(x["share_window_pct"] or 0)))
+    for i, x in enumerate(rows, 1):
+        x["rank"] = i
+    return rows, sv.get("generated")
+
+
+def render_choose(rows, generated, E):
+    """The hasher-facing table. Nothing is rendered without survey data."""
+    if not rows:
+        return ""
+
+    def cell_v1(x):
+        s = x["sv1"]
+        if not s["endpoints"]:
+            return '<span class=note>listed, not reachable</span>' if s["listed"] else '<span class=note>none found</span>'
+        out = "<br>".join(f'<span class=mono>{E(e)}</span>' for e in s["endpoints"][:2])
+        if len(s["endpoints"]) > 2:
+            out += f'<br><span class=note>and {len(s["endpoints"]) - 2} more</span>'
+        return out + (f'<br>fee: {E(s["fee"])}' if s["fee"] else '<br><span class=note>fee not read</span>')
+
+    def cell_datum(x):
+        d = x["datum"]
+        out = tipped(d["status"], d["detail"]) if d["detail"] else E(d["status"])
+        return out + (f'<br>fee: {E(d["fee"])}' if d["fee"] and d["status"] in DATUM_AVAILABLE else "")
+
+    def cell_trust(t):
+        if t is None:
+            return '<span class=note>-</span>'
+        if "not measured" in t:
+            return f'<span class=note>{E(t)}</span>'
+        n = ("block" in t) + ("reward" in t)
+        cls = {2: "bad", 1: "warn", 0: "ok"}[n]
+        return f'<span class="{cls}">{E(t)}</span>'
+
+    def cell_canary(x):
+        parts = []
+        for path in ("sv1", "datum"):
+            c = x["canary"].get(path)
+            if not c:
+                continue
+            what = c["result"]
+            if c["height"]:
+                what += f" at {c['height']}"
+            elif c["result"] == "waiting":
+                what += f" after {c['pool_blocks_since']} of the pool's blocks"
+            parts.append(f'{E("sv1 port" if path == "sv1" else "own gateway")}: {E(what)}')
+        return "<br>".join(parts) if parts else '<span class=note>none yet</span>'
+
+    has_canary = any(x["canary"] for x in rows)
+    canary_th = th("Canary", "choose_canary") if has_canary else ""
+    body = ""
+    for x in rows:
+        name = f'<a href="{E(x["link"])}" rel="noopener">{E(x["pool"])}</a>' if x["link"] else E(x["pool"])
+        if not x["datum_offered"]:
+            name += '<br><span class=warn>sv1 only</span>'
+        share = f'{x["share_7d_pct"]:.1f}%' if x["share_7d_pct"] is not None else "-"
+        bpd = f'{x["blocks_per_day"]:.1f}' if x["blocks_per_day"] is not None else "-"
+        body += (f'<tr><td>{name}</td><td class=n>{share}</td><td class=n>{bpd}</td>'
+                 f'<td>{cell_datum(x)}</td><td>{cell_v1(x)}</td><td>{E(x["payout"]["text"])}</td>'
+                 f'<td>{cell_trust(x["trust"]["sv1_port"])}</td><td>{cell_trust(x["trust"]["own_gateway"])}</td>'
+                 + (f'<td>{cell_canary(x)}</td>' if has_canary else "") + '</tr>')
+    return f"""
+<h2 id="pools">Choosing a pool</h2>
+<p class="note">For anyone deciding where to point a miner. Every pool can be reached two ways: its public
+stratum v1 port, where the pool's node builds the block, and your own DATUM gateway, where your node builds it.
+The two <em>you hand the pool</em> columns say what each path gives up. <em>The block</em> means the pool chooses
+the transactions. <em>Your reward</em> means the pool receives it and pays you later from its balance, which is
+measured from its coinbases, not taken from its site. Fees are what each pool's own site says. At the same
+hashrate you earn the same before fees on any pool; what changes is how often a payout arrives, which follows
+blocks per day, and who holds the money in between.</p>
+<p class="note"><strong>Run your own gateway and point it at a pool that offers DATUM.</strong> The block stays yours,
+and where the pool pays in the coinbase, so does the reward. Pools that offer DATUM are listed first, largest first
+because a larger pool pays more often; pools with no DATUM service are marked <span class=warn>sv1 only</span> and
+listed last. The same rows are published as <a href="pools.json">pools.json</a> for other sites to use.</p>
+<div class="wrap"><table class="stack wide dense">
+<tr>{th("Pool", "pool")}{th("Share, 7 days", "choose_share", "n")}{th("Blocks per day", "choose_bpd", "n")}{th("Own DATUM gateway", "choose_datum")}{th("Public sv1 port", "choose_sv1")}{th("Reward leaves the block", "choose_paid")}{th("On the sv1 port you hand the pool", "choose_trust_v1")}{th("With your own gateway you hand the pool", "choose_trust_gw")}{canary_th}</tr>
+{body}
+</table></div>
+<p class="note">Pools with a public endpoint or at least one percent of the survey window are listed;
+individual miners, marketplaces and category labels are not. The pool's node builds every block found
+through a stratum v1 port by construction, so that column needs no measurement. The reward column and
+the on-chain share come from this site's own coinbase index. Survey generated {E(generated or "unknown")}.</p>
+"""
+
+
 def render_html(path, sd, st):
     E = html.escape
     now = NOW
@@ -1509,6 +1742,13 @@ def render_html(path, sd, st):
                    "The chain shows movement, not a sale. Held is mined minus moved and includes immature rewards.")
     forks_html = render_forks(sd, E, colormap, st)
     survey_html = render_survey(sd, E)
+    if os.path.exists(rw_path):
+        week, week_total = week_counts(rw, now)
+        canaries = canary_results(sd, rw)
+    else:
+        week, week_total, canaries = None, 0, {}
+    choose, choose_gen = choose_rows(sd, week, week_total, canaries)
+    choose_html = render_choose(choose, choose_gen, E)
     knot = ('<svg class="mark" viewBox="0 0 773 773" width="60" height="60" role="img" aria-label="Bitcoin Knots">'
             '<circle cx="386.5" cy="386.5" r="380" fill="#f7931a"/>'
             '<circle cx="386.5" cy="386.5" r="380" fill="none" stroke="#b8651a" stroke-width="14"/>'
@@ -1688,6 +1928,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 </table></div>
 <p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: the miner's own gateway and node built the block; the pool only coordinated payout. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block: one output kept by the pool and paid out later, two outputs, or paid directly to miners in the coinbase.</p>
 
+{choose_html}
 {survey_html}
 <h2>Latest blocks</h2>
 <div class="wrap"><table class="stack wide dense">
@@ -1722,6 +1963,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <li><strong>Pool names.</strong> {E(TIPS["pool"])}</li>
 <li><strong>Template built by.</strong> {E(TIPS["builder"])}</li>
 <li><strong>Coinbase payout.</strong> {E(TIPS["payout"])}</li>
+<li><strong>Choosing a pool.</strong> {E(TIPS["choose_trust_v1"])} {E(TIPS["choose_trust_gw"])} {E(TIPS["choose_canary"])}</li>
 <li><strong>Moved and held.</strong> {E(TIPS["moved"])} {E(TIPS["held"])}</li>
 <li><strong>Wallets.</strong> {E(TIPS["wallet"])}</li>
 <li><strong>Movement shapes.</strong> {E(TIPS["shape"])}</li>
@@ -1867,6 +2109,21 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
     with open(path + ".tmp", "w") as f:
         f.write(page)
     os.replace(path + ".tmp", path)
+    if choose:
+        # The same rows as the "Choosing a pool" table, for other sites. Addresses of
+        # canaries are never included; only what happened to them.
+        feed = {"generated": int(now), "tip_height": tip_h, "survey_generated": choose_gen,
+                "window_days": 7, "source": REPO_URL,
+                "method": {"share_7d_pct": TIPS["choose_share"], "payout": TIPS["choose_paid"],
+                           "sv1": TIPS["choose_sv1"], "datum": TIPS["choose_datum"],
+                           "trust_sv1_port": TIPS["choose_trust_v1"], "trust_own_gateway": TIPS["choose_trust_gw"],
+                           "canary": TIPS["choose_canary"],
+                           "terms": "What each pool's own site says, with the URL and the date it was read. Not verified."},
+                "pools": choose}
+        fp = os.path.join(os.path.dirname(path) or ".", "pools.json")
+        with open(fp + ".tmp", "w") as f:
+            json.dump(feed, f, indent=1, sort_keys=True)
+        os.replace(fp + ".tmp", fp)
 
 
 def load_state(path):
