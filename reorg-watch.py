@@ -900,7 +900,7 @@ TIPS = {
     "pool": "A pool named in the coinbase tag and paid in the coinbase wins; otherwise the first payout address in Kilombino's pool list, then the tag. Both are chosen by the miner, so a name is a claim, not proof.",
     "blocks24": "Blocks whose header time falls in the last 24 hours. Shares are block counts and carry a few points of statistical noise.",
     "share24": "This pool's blocks divided by all blocks in the last 24 hours.",
-    "builder": "Read from the coinbase layout the DATUM gateway writes. DATUM pool: the unique-id push is 7 or more bytes, which the gateway writes only with a DATUM pool upstream, so the miner's own node built the block. Gateway, stratum v1: a 3-byte unique-id push, the gateway running standalone, so the node of whoever owns the payout address built the block. Other software: a coinbase this page does not recognize.",
+    "builder": "Read from the coinbase layout the DATUM gateway writes. DATUM pool: the unique-id push is 7 or more bytes, which the gateway writes only with a DATUM pool upstream, so the node running that gateway built the block, normally the miner's own; a pool's public stratum port served by the pool's own gateway looks the same. Gateway, stratum v1: a 3-byte unique-id push, the gateway running standalone, so the node of whoever owns the payout address built the block. Other software: a coinbase this page does not recognize.",
     "pool_share": "Share of a recent window of blocks, by pool (choose the window with the selector), from the coinbase payout address then tag. Block counts carry a few points of noise. The point of the ring is concentration: one pool at or above half the hashrate can rewrite recent history, so a single dominant slice is the reorg risk this page watches for.",
     "recent_blocks": "Each card is one block: height, pool, transaction count, total reward, and how long ago it arrived. Colour is the pool, matching the share ring; a block from a pool outside the day's top seven is grey. Age counts up from the block's header time by your device clock.",
     "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
@@ -932,7 +932,7 @@ TIPS = {
     "shape": "Payout has 3 or more outputs, sweep gathers several rewards into 1 or 2 outputs, transfer moves one reward to 1 or 2 outputs.",
     "choose_share": "This pool's blocks divided by all blocks in the last 7 days by header time.",
     "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
-    "choose_datum": "Whether a DATUM service was found: yes when a pool pubkey and endpoint are published, or the endpoint alone, or documented on the site. The fee is what the pool's site says, read on the date in pools.json.",
+    "choose_datum": "Whether the pool runs a DATUM service that your own DATUM gateway can connect to: yes when a pool pubkey and endpoint are published, or the endpoint alone, or the site documents DATUM mining without naming a host. The fee is what the pool's site says, read on the date in pools.json.",
     "choose_sv1": "Public stratum v1 endpoints that answered a probe. The fee is what the pool's site says, read on the date in pools.json.",
     "choose_paid": "Measured from this pool's coinbases over the survey window, not taken from its site: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Held by the pool, paid later: one or two outputs with most of the value to one address. Paid in the coinbase: the miners, or the finder, are paid in the block itself.",
     "choose_trust_v1": "On a public stratum v1 port the pool's node always builds the block, so you hand it the choice of transactions. Whether it also holds your reward is the measured payout column.",
@@ -946,7 +946,7 @@ TIPS = {
     "event": "Reorgs name the pools on both sides. Explorer and node events say which check failed and for how many consecutive runs.",
 }
 CLASS_TIPS = {
-    "D": "Unique-id push of 7 or more bytes: the gateway had a DATUM pool upstream, so the miner's own node built this template. The pool could not choose the transactions.",
+    "D": "Unique-id push of 7 or more bytes: the gateway that built this template had a DATUM pool upstream, so the pool could not choose the transactions. That gateway is normally the miner's own; a pool's public stratum port served by the pool's own gateway looks the same, and then the pool's node built the block.",
     "G": "Unique-id push of 3 bytes: the DATUM gateway running standalone, serving stratum v1. The node of whoever owns the payout address built this template.",
     "O": "A coinbase layout this page does not recognize. Not built by the DATUM gateway software.",
 }
@@ -1709,11 +1709,35 @@ def render_choose(rows, generated, E):
 
     has_canary = any(x["canary"] for x in rows)
     canary_th = th("Canary", "choose_canary") if has_canary else ""
+
+    # The question people actually ask: which pools take a DATUM gateway, and which do not.
+    def name_pct(x):
+        pct = x["share_7d_pct"]
+        if pct is None:
+            return E(x["pool"])
+        return f'{E(x["pool"])} ({pct:.1f}%)' if pct < 1 else f'{E(x["pool"])} ({pct:.0f}%)'
+    active = [x for x in rows if x["blocks_7d"]]
+    datum_only = [x for x in rows if x["datum_offered"] and not x["sv1"]["endpoints"] and not x["sv1"]["listed"]]
+    parts = []
+    if any(x["datum_offered"] for x in active):
+        parts.append("<strong>Pools with a DATUM service</strong>, by share of the last 7 days: "
+                     + ", ".join(name_pct(x) for x in active if x["datum_offered"]) + ".")
+    if any(not x["datum_offered"] for x in active):
+        parts.append("<strong>Stratum v1 only, no DATUM service found:</strong> "
+                     + ", ".join(name_pct(x) for x in active if not x["datum_offered"]) + ".")
+    if datum_only:
+        parts.append("<strong>DATUM only, no public stratum port on file:</strong> " + ", ".join(name_pct(x) for x in datum_only) + ".")
+    if parts and not any(x["blocks_7d"] for x in datum_only):
+        parts.append("No pool finding blocks this week is DATUM-only: every one with a DATUM service also lists a public "
+                     "stratum v1 port, so which path you use is your choice, not the pool's.")
+    summary = " ".join(parts)
     body = ""
     for x in rows:
         name = f'<a href="{E(x["link"])}" rel="noopener">{E(x["pool"])}</a>' if x["link"] else E(x["pool"])
         if not x["datum_offered"]:
             name += '<br><span class=warn>sv1 only</span>'
+        elif not x["sv1"]["endpoints"] and not x["sv1"]["listed"]:
+            name += '<br><span class=ok>DATUM only</span>'
         share = f'{x["share_7d_pct"]:.1f}%' if x["share_7d_pct"] is not None else "-"
         bpd = f'{x["blocks_per_day"]:.1f}' if x["blocks_per_day"] is not None else "-"
         body += (f'<tr><td>{name}</td><td class=n>{share}</td><td class=n>{bpd}</td>'
@@ -1722,19 +1746,21 @@ def render_choose(rows, generated, E):
                  + (f'<td>{cell_canary(x)}</td>' if has_canary else "") + '</tr>')
     return f"""
 <h2 id="pools">Choosing a pool</h2>
-<p class="note">For anyone deciding where to point a miner. Every pool can be reached two ways: its public
-stratum v1 port, where the pool's node builds the block, and your own DATUM gateway, where your node builds it.
-The two <em>you hand the pool</em> columns say what each path gives up. <em>The block</em> means the pool chooses
-the transactions. <em>Your reward</em> means the pool receives it and pays you later from its balance, which is
-measured from its coinbases, not taken from its site. Fees are what each pool's own site says. At the same
-hashrate you earn the same before fees on any pool; what changes is how often a payout arrives, which follows
-blocks per day, and who holds the money in between.</p>
-<p class="note"><strong>Run your own gateway and point it at a pool that offers DATUM.</strong> The block stays yours,
-and where the pool pays in the coinbase, so does the reward. Pools that offer DATUM are listed first, largest first
-because a larger pool pays more often; pools with no DATUM service are marked <span class=warn>sv1 only</span> and
-listed last. The same rows are published as <a href="pools.json">pools.json</a> for other sites to use.</p>
+<p class="note">For anyone deciding where to point a miner. A pool can be reached in up to two ways: its public
+stratum v1 port, where the pool's node builds the block, and a DATUM service, which your own DATUM gateway connects
+to so that your node builds the block. The two <em>you hand the pool</em> columns say what each path gives up.
+<em>The block</em> means the pool chooses the transactions. <em>Your reward</em> means the pool receives it and pays
+you later from its balance, which is measured from its coinbases, not taken from its site. Fees are what each pool's
+own site says. At the same hashrate you earn the same before fees on any pool; what changes is how often a payout
+arrives, which follows blocks per day, and who holds the money in between.</p>
+<p class="note">{summary}</p>
+<p class="note"><strong>Run your own gateway and point it at a pool with a DATUM service.</strong> The block stays yours,
+and where the pool pays in the coinbase, so does the reward. Pools with a DATUM service are listed first, largest first
+because a larger pool pays more often. Pools with no DATUM service are marked <span class=warn>sv1 only</span> and
+listed last; a pool with a DATUM service and no public stratum port on file is marked <span class=ok>DATUM only</span>.
+The same rows are published as <a href="pools.json">pools.json</a> for other sites to use.</p>
 <div class="wrap"><table class="stack wide dense">
-<tr>{th("Pool", "pool")}{th("Share, 7 days", "choose_share", "n")}{th("Blocks per day", "choose_bpd", "n")}{th("Own DATUM gateway", "choose_datum")}{th("Public sv1 port", "choose_sv1")}{th("Reward leaves the block", "choose_paid")}{th("On the sv1 port you hand the pool", "choose_trust_v1")}{th("With your own gateway you hand the pool", "choose_trust_gw")}{canary_th}</tr>
+<tr>{th("Pool", "pool")}{th("Share, 7 days", "choose_share", "n")}{th("Blocks per day", "choose_bpd", "n")}{th("DATUM service", "choose_datum")}{th("Public sv1 port", "choose_sv1")}{th("Reward leaves the block", "choose_paid")}{th("On the sv1 port you hand the pool", "choose_trust_v1")}{th("With your own gateway you hand the pool", "choose_trust_gw")}{canary_th}</tr>
 {body}
 </table></div>
 <p class="note">Pools with a public endpoint or at least one percent of the survey window are listed;
@@ -2150,7 +2176,7 @@ th.n [data-tip]:hover::after, th.n [data-tip]:focus::after, td.n [data-tip]:hove
 <tr>{th("Pool", "pool")}{th("Blocks", "blocks_fork", "n")}{th("Template built by", "builder")}{th("Coinbase payout", "payout")}{th("Mined BTC", "mined", "n")}{th("Matured", "matured", "n")}{th("Moved", "moved", "n")}{th("Moved / matured", "moved_pct", "n")}{th("Held", "held", "n")}{th("Last movement", "last_move")}</tr>
 {reward_rows or "<tr><td colspan=10 class=note>none</td></tr>"}
 </table></div>
-<p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: the miner's own gateway and node built the block; the pool only coordinated payout. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block, read from the coinbases: <em>paid to miners in the coinbase</em> (three or more outputs), <em>paid to the finder in the coinbase</em> (one or two outputs, to a different address each block), or <em>held by the pool, paid later</em> (one or two outputs, most of the value to one address; earlier versions of this page called this pool custody). Hover or tap a cell for the numbers behind it.</p>
+<p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: a gateway with a DATUM pool upstream built the block and the pool only set the payout; that gateway is normally the miner's own, though a pool's public stratum port served by the pool's own gateway looks the same. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block, read from the coinbases: <em>paid to miners in the coinbase</em> (three or more outputs), <em>paid to the finder in the coinbase</em> (one or two outputs, to a different address each block), or <em>held by the pool, paid later</em> (one or two outputs, most of the value to one address; earlier versions of this page called this pool custody). Hover or tap a cell for the numbers behind it.</p>
 
 {choose_html}
 {survey_html}
