@@ -83,11 +83,23 @@ RATE_LOW, RATE_HIGH = 0.65, 1.5   # blocks in 6 h against the prior day's pace
 ORPHAN_WINS = 3           # depth-1 reorgs one pool won against others in 24 h
 BRANCH_ALERT_LEN = 3      # a competing branch at least this long...
 BRANCH_ALERT_GAP = 2      # ...whose tip is within this many blocks of ours, or above it
+AHEAD_NOTE = 2            # crawled peers this many blocks past our tip get a note on the page
+# Knots 29.4.2 (part 1 of 3): coinbases mined from LONG_MATURITY_START cannot be spent before
+# LONG_MATURITY_RELEASE, about 45 days. Below the start height the 100-block rule still holds.
+LONG_MATURITY_START = 973440
+LONG_MATURITY_RELEASE = 979920
 NOW = time.time()
 
 
 def ts(t=None):
     return time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(NOW if t is None else t))
+
+
+def mature_at(h):
+    """First height at which the coinbase mined at height h can be spent."""
+    if h >= LONG_MATURITY_START:
+        return max(h + 100, LONG_MATURITY_RELEASE)
+    return h + 100
 
 
 PAGE_TZ = ZoneInfo("UTC")
@@ -740,7 +752,7 @@ class Rewards:
             p["nouts"].append(len(c["outs"]))
             for spk, v in c["outs"].values():
                 p["by_spk"][spk] = p["by_spk"].get(spk, 0) + v
-            if c["h"] <= tip - 100:
+            if tip >= mature_at(c["h"]):
                 p["matured"] += sats
         for x in self.d["spends"]:
             for label, sats in x["labels"].items():
@@ -876,6 +888,10 @@ def line_for(e):
         return f"ALERT {e['pool']} won {e['wins']} depth-1 reorgs against other pools in {e['hours']} h"
     if t == "wallet_share":
         return f"ALERT one wallet mined {e['share']}% of the last 24 h ({e['blocks']}/{e['of']} blocks) under labels {', '.join(e['labels'])}"
+    if t == "invalid_block":
+        who = ", ".join(f"{p} {n}" for p, n in e["pools"].items()) or "unknown"
+        return (f"ALERT block {e['height']} {e['hash'][:16]} is invalid under this node's rules; mined by {who}. "
+                f"A miner on other rules forks off the chain each time it builds on it")
     if t == "competing_branch":
         who = ", ".join(f"{p} {n}" for p, n in e["pools"].items()) or "blocks not yet validated"
         return (f"ALERT competing branch of {e['branchlen']} blocks from height {e['forked_at']}: its tip {e['tip_height']} "
@@ -914,7 +930,7 @@ TIPS = {
     "blocks_fork": "All blocks this label has mined since the BLAKE2b fork block.",
     "payout": "How the reward leaves this label's blocks, read from its coinbases: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
     "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC.",
-    "matured": "Mined at least 100 blocks ago, so spendable.",
+    "matured": "Spendable now. Mined at least 100 blocks ago, except that coinbases from block 973440 stay locked until block 979920 (about 45 days) under Knots 29.4.2, and count as matured only from there.",
     "moved": "Coinbase outputs of this pool that have been spent in any later transaction, whether a payout to miners, a consolidation, or a transfer. The chain shows movement, not a sale.",
     "moved_pct": "Moved divided by matured. 100 percent means every spendable reward has left the coinbase address.",
     "held": "Mined minus moved. Includes rewards that are not yet mature.",
@@ -1259,14 +1275,28 @@ def render_forks(sd, E, colormap, st):
         cw = None
     if cw and cw.get("blake2b"):
         div = cw.get("divergent") or []
+        # peers past our tip on blocks we hold: what a block this node rejected looks like
+        # from here, until our side finds its own next block and the crawl calls it a split
+        ahead = []
+        for r in cw.get("peers") or []:
+            m = re.match(r"agrees \(ahead (\d+)\)", str(r.get("verdict", "")))
+            if m and int(m.group(1)) >= AHEAD_NOTE:
+                ahead.append(int(m.group(1)))
+        if ahead:
+            crawl_html += (f'<p class="note bad"><strong>{len(ahead)} of {cw["blake2b"]} peers report a '
+                           f'chain {max(ahead)} blocks past our tip {cw["our_tip"]}</strong> that this '
+                           f'node has not accepted. If a branch above is marked invalid, those '
+                           f'peers are following a block this node rejected.</p>')
         if div:
             worst = min(d.get("at_height", 0) for d in div)
-            crawl_html = (f'<p class="note bad"><strong>{len(div)} of {cw["blake2b"]} peers on '
+            far = max((d.get("their_tip") or 0) for d in div)
+            lead = f' Their chain reaches height {far}, {far - cw["our_tip"]:+d} against ours.' if far else ""
+            crawl_html += (f'<p class="note bad"><strong>{len(div)} of {cw["blake2b"]} peers on '
                           f'this chain report a different block</strong>, earliest at height '
                           f'{worst}. That is a split, not a stale block: those nodes are '
-                          f'building on something this node does not have.</p>')
+                          f'building on something this node does not have.{lead}</p>')
         else:
-            crawl_html = (f'<p class="note"><strong>{cw["agree"]} of {cw["blake2b"]}</strong> peers '
+            crawl_html += (f'<p class="note"><strong>{cw["agree"]} of {cw["blake2b"]}</strong> peers '
                           f'asked directly returned the same blocks we hold, up to height '
                           f'{cw["our_tip"]}, and none reported a different one. Asked '
                           f'{cw["asked"]} addresses, {cw["answered"]} answered, '
@@ -1503,7 +1533,20 @@ def competing_branch_checks(sd, st, events, now):
     if H is None:
         return
     seen = st.setdefault("risk", {}).setdefault("branch_alerted", {})
+    bad = st["risk"].setdefault("invalid_alerted", [])
     for br in d.get("branches", []):
+        if br.get("status") == "invalid":
+            # A block this node refused to connect: whoever mined it is on other consensus
+            # rules. Alert once per block; the tip stays in getchaintips for good.
+            if br.get("tip_hash") in bad:
+                continue
+            bad.append(br.get("tip_hash"))
+            pools = {}
+            for b in br.get("lost", []):
+                pools[b.get("pool") or "?"] = pools.get(b.get("pool") or "?", 0) + 1
+            events.append({"type": "invalid_block", "level": "ALERT", "height": br["tip_height"],
+                           "hash": br.get("tip_hash") or "", "active_height": H, "pools": pools})
+            continue
         if br.get("status") == "active" or br.get("branchlen", 0) < BRANCH_ALERT_LEN:
             continue
         if H - br["tip_height"] > BRANCH_ALERT_GAP:
