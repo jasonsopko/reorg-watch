@@ -81,6 +81,8 @@ SHARE_ALERT = 0.45        # one pool's share of the last 6 hours
 SHARE_MIN_BLOCKS = 40     # and at least this many blocks in those 6 hours
 RATE_LOW, RATE_HIGH = 0.65, 1.5   # blocks in 6 h against the prior day's pace
 ORPHAN_WINS = 3           # depth-1 reorgs one pool won against others in 24 h
+BRANCH_ALERT_LEN = 3      # a competing branch at least this long...
+BRANCH_ALERT_GAP = 2      # ...whose tip is within this many blocks of ours, or above it
 NOW = time.time()
 
 
@@ -874,6 +876,10 @@ def line_for(e):
         return f"ALERT {e['pool']} won {e['wins']} depth-1 reorgs against other pools in {e['hours']} h"
     if t == "wallet_share":
         return f"ALERT one wallet mined {e['share']}% of the last 24 h ({e['blocks']}/{e['of']} blocks) under labels {', '.join(e['labels'])}"
+    if t == "competing_branch":
+        who = ", ".join(f"{p} {n}" for p, n in e["pools"].items()) or "blocks not yet validated"
+        return (f"ALERT competing branch of {e['branchlen']} blocks from height {e['forked_at']}: its tip {e['tip_height']} "
+                f"against ours {e['active_height']} ({e['status']}); mined by {who}")
     return f"{e.get('level', 'INFO')} {t} " + json.dumps({k: v for k, v in e.items() if k not in ('type', 'level')})
 
 
@@ -1480,6 +1486,42 @@ def concentration_checks(sd, st, events, now):
             risk["orphan_alerted"][w] = now
             events.append({"type": "orphan_wins", "level": "ALERT", "pool": w, "wins": c, "hours": 24})
     return m
+
+
+def competing_branch_checks(sd, st, events, now):
+    """A rival chain being built alongside ours. chain-tips.py writes every branch the node
+    knows about once a minute; a branch that is long and close to our tip, or ahead of it in
+    headers we have not validated, is what a reorg looks like before it happens. Alert once
+    per fork point, again when the branch has grown by three blocks or after 30 minutes."""
+    try:
+        with open(os.path.join(sd, "chain-tips.json")) as f:
+            d = json.load(f)
+    except Exception:  # noqa: BLE001 - no tips file yet, or a half-written one
+        return
+    active = d.get("active") or {}
+    H = active.get("height")
+    if H is None:
+        return
+    seen = st.setdefault("risk", {}).setdefault("branch_alerted", {})
+    for br in d.get("branches", []):
+        if br.get("status") == "active" or br.get("branchlen", 0) < BRANCH_ALERT_LEN:
+            continue
+        if H - br["tip_height"] > BRANCH_ALERT_GAP:
+            continue
+        key = str(br["forked_at"])
+        prev = seen.get(key)
+        if prev and br["branchlen"] < prev["len"] + 3 and now - prev["t"] < 1800:
+            continue
+        seen[key] = {"len": br["branchlen"], "t": now}
+        pools = {}
+        for b in br.get("lost", []):
+            pools[b.get("pool") or "?"] = pools.get(b.get("pool") or "?", 0) + 1
+        events.append({"type": "competing_branch", "level": "ALERT", "forked_at": br["forked_at"],
+                       "branchlen": br["branchlen"], "tip_height": br["tip_height"], "active_height": H,
+                       "status": br.get("status"), "tip_hash": br.get("tip_hash"),
+                       "pools": dict(sorted(pools.items(), key=lambda kv: -kv[1])[:3])})
+    for key in [k for k, v in seen.items() if now - v["t"] > 86400]:
+        del seen[key]
 
 
 def render_risk(sd, st, rw, E, now):
@@ -2692,6 +2734,7 @@ def main():
             print(f"{ts()} reward index failed: {e}")
 
     concentration_checks(sd, st, events, NOW)
+    competing_branch_checks(sd, st, events, NOW)
 
     finish(sd, args, st, state_path, events)
     if args.verbose and not events:
