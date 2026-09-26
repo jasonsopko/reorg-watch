@@ -240,6 +240,17 @@ class Pools:
         for n in hits:
             if n in paid_any:
                 return n
+        # A coinbase paying three or more outputs is a pool paying its miners
+        # (CONVOY since 973395 pays each miner in the block and keeps little
+        # or nothing itself). The payees are miners, so a pool tag names the
+        # builder better than any of them. When several tags match, the one
+        # earliest in the coinbase is the pool's; a miner's secondary tag
+        # comes after it. "DATUM" alone names the software, not a pool, so it
+        # never wins here.
+        # At the same position the longer, more specific tag wins.
+        pool_tags = [(tag.find(t), -len(t), n) for t, n in self.tags if t in tag and t.lower() != "datum"]
+        if pool_tags and len(addrs) >= 3:
+            return min(pool_tags)[2]
         by_tag = hits[0] if hits else None
         for n in paid:
             # Kilombino autotags address-only solo miners as "Solo <prefix>";
