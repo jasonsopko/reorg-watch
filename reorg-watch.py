@@ -507,6 +507,20 @@ def named(label):
     return not (label.startswith("Solo ") or label.lower().startswith("unknown") or label.lower().startswith("solo"))
 
 
+def recent_shape(coinbases):
+    """Median value-bearing outputs, and the percent of all value to the single most-paid
+    script, over the coinbases given (a label's most recent ones)."""
+    nouts = sorted(sum(1 for o in c["outs"].values() if o[1] > 0) for c in coinbases)
+    by_spk, total = {}, 0
+    for c in coinbases:
+        for spk, v in c["outs"].values():
+            by_spk[spk] = by_spk.get(spk, 0) + v
+            total += v
+    med = nouts[len(nouts) // 2] if nouts else None
+    dom = 100 * max(by_spk.values()) / total if total and by_spk else None
+    return med, dom
+
+
 def payout_class(med, dom, kind):
     """One reading of how the reward leaves a label's coinbases, shared by every table on the
     page and by pools.json so they cannot disagree. med is the median number of value-bearing
@@ -581,6 +595,9 @@ class Rewards:
             del cbs[txid]
         self.dropped = {x["txid"] for x in self.d["spends"] if x["h"] > height}
         self.d["spends"] = [x for x in self.d["spends"] if x["h"] <= height]
+        for c in cbs.values():
+            for n in [n for n, t in c.get("spent", {}).items() if t in self.dropped]:
+                del c["spent"][n]
         self.d["scanned_to"] = height
 
     def process_block(self, rest, pools, height, blockhash, t, label=None):
@@ -604,6 +621,7 @@ class Rewards:
             for p, n in tx["vin"]:
                 if p in cbs and str(n) in cbs[p]["outs"]:
                     spk, sats = cbs[p]["outs"][str(n)]
+                    cbs[p].setdefault("spent", {})[str(n)] = tx["txid"]
                     ins.append(spk_to_address(bytes.fromhex(spk)) or spk)
                     labels[cbs[p]["label"]] = labels.get(cbs[p]["label"], 0) + sats
                     cb_sats += sats
@@ -623,12 +641,33 @@ class Rewards:
             self.d["spends"].append(rec)
         self.d["scanned_to"] = height
 
+    def index_spent_outputs(self, rest, verbose):
+        """Mark which coinbase outputs each indexed spend consumed, for an index built before
+        outputs carried their own spent marks. Totals then follow a coinbase's current label, so
+        relabeling a block moves its spends with it. Runs once; one REST lookup per spend."""
+        cbs = self.d["coinbases"]
+        for x in self.d["spends"]:
+            tx = rest.tx(x["txid"])
+            if not tx:
+                continue
+            for vin in tx.get("vin", []):
+                p, n = vin.get("txid"), vin.get("vout")
+                if p in cbs and str(n) in cbs[p]["outs"]:
+                    cbs[p].setdefault("spent", {})[str(n)] = x["txid"]
+        self.d["spent_index"] = True
+        if verbose:
+            print(f"{ts()} reward index: marked spent outputs for {len(self.d['spends'])} spending txs", flush=True)
+
     def sync(self, rest, pools, chain, blocks_meta, top, ancestor, floor, sweep_sats, verbose):
         """Bring the index up to `top`. Returns the list of new spend records."""
         if self.d["scanned_to"] is not None and ancestor is not None and ancestor < self.d["scanned_to"]:
             self.rollback(ancestor)
+        if not self.d.get("spent_index") and self.d["scanned_to"] is not None:
+            self.index_spent_outputs(rest, verbose)
         before = len(self.d["spends"])
         backfill = self.d["scanned_to"] is None
+        if backfill:
+            self.d["spent_index"] = True  # a fresh index marks outputs as it goes
         if backfill:
             start = floor
             print(f"{ts()} reward index: backfilling from {start} to {top}, one pass over the raw blocks", flush=True)
@@ -761,27 +800,59 @@ class Rewards:
         return found
 
     def summary(self, tip):
-        per = {}
+        """Per label: blocks, what was mined, and what happened to it. A coinbase with one or two
+        value outputs is the pool's own reward; one with three or more pays miners in the block,
+        and only its outputs to the pool's own addresses count as the pool's. own_* covers the
+        pool's rewards, paid_mined the miners'. recent is the label's last 20 coinbases."""
+        spend_at = {x["txid"]: x for x in self.d["spends"]}
+        exact = self.d.get("spent_index", False)
+        by_label = {}
         for c in self.d["coinbases"].values():
-            p = per.setdefault(c["label"], {"blocks": 0, "mined": 0, "matured": 0, "moved": 0, "n_spends": 0, "last_t": None, "last_kind": None,
-                                            "cls": {}, "nouts": [], "by_spk": {}})
-            sats = sum(v for _, v in c["outs"].values())
-            p["blocks"] += 1
-            p["mined"] += sats
-            p["cls"][c.get("cls", "O")] = p["cls"].get(c.get("cls", "O"), 0) + 1
-            p["nouts"].append(len(c["outs"]))
-            for spk, v in c["outs"].values():
-                p["by_spk"][spk] = p["by_spk"].get(spk, 0) + v
-            if tip >= mature_at(c["h"]):
-                p["matured"] += sats
-        for x in self.d["spends"]:
-            for label, sats in x["labels"].items():
-                p = per.setdefault(label, {"blocks": 0, "mined": 0, "matured": 0, "moved": 0, "n_spends": 0, "last_t": None, "last_kind": None,
-                                           "cls": {}, "nouts": [], "by_spk": {}})
-                p["moved"] += sats
-                p["n_spends"] += 1
-                if p["last_t"] is None or x["t"] > p["last_t"]:
-                    p["last_t"], p["last_kind"] = x["t"], x["kind"]
+            by_label.setdefault(c["label"], []).append(c)
+        per = {}
+        for label, cs in by_label.items():
+            cs.sort(key=lambda c: c["h"])
+            own_addrs = {o[0] for c in cs if sum(1 for o in c["outs"].values() if o[1] > 0) < 3 for o in c["outs"].values()}
+            p = {"blocks": len(cs), "mined": 0, "matured": 0, "moved": 0, "n_spends": 0, "last_t": None, "last_kind": None,
+                 "cls": {}, "nouts": [], "by_spk": {}, "own_mined": 0, "own_matured": 0, "own_moved": 0,
+                 "paid_mined": 0, "recent": cs[-20:]}
+            for c in cs:
+                sats = sum(v for _, v in c["outs"].values())
+                matured = tip >= mature_at(c["h"])
+                p["mined"] += sats
+                p["cls"][c.get("cls", "O")] = p["cls"].get(c.get("cls", "O"), 0) + 1
+                p["nouts"].append(len(c["outs"]))
+                if matured:
+                    p["matured"] += sats
+                for n, (spk, v) in c["outs"].items():
+                    p["by_spk"][spk] = p["by_spk"].get(spk, 0) + v
+                    own = spk in own_addrs
+                    spent = c.get("spent", {}).get(n)
+                    if own:
+                        p["own_mined"] += v
+                        p["own_matured"] += v if matured else 0
+                    else:
+                        p["paid_mined"] += v
+                    if spent:
+                        p["moved"] += v
+                        p["own_moved"] += v if own else 0
+                        x = spend_at.get(spent)
+                        if x and (p["last_t"] is None or x["t"] > p["last_t"]):
+                            p["last_t"], p["last_kind"] = x["t"], x["kind"]
+            per[label] = p
+        if not exact:
+            # Index built before outputs carried spent marks: fall back to the spend records' labels.
+            for p in per.values():
+                p["moved"] = p["own_moved"] = 0
+            for x in self.d["spends"]:
+                for label, sats in x["labels"].items():
+                    p = per.get(label)
+                    if p:
+                        p["moved"] += sats
+                        p["own_moved"] += sats
+                        p["n_spends"] += 1
+                        if p["last_t"] is None or x["t"] > p["last_t"]:
+                            p["last_t"], p["last_kind"] = x["t"], x["kind"]
         return sorted(per.items(), key=lambda kv: -kv[1]["blocks"])
 
 
@@ -948,12 +1019,12 @@ TIPS = {
     "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
     "hourshare": "This pool's share of that hour's blocks. The three columns are the three largest pools of the day. Cells at or above half are marked.",
     "blocks_fork": "All blocks this label has mined since the BLAKE2b fork block.",
-    "payout": "How the reward leaves this label's blocks, read from its coinbases: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
-    "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC.",
-    "matured": "Spendable now. Mined at least 100 blocks ago, except that coinbases from block 973440 stay locked until block 979920 (about 45 days) under Knots 29.4.2, and count as matured only from there.",
-    "moved": "Coinbase outputs of this pool that have been spent in any later transaction, whether a payout to miners, a consolidation, or a transfer. The chain shows movement, not a sale.",
+    "payout": "How the reward leaves this label's blocks, read from its last 20 coinbases, so a pool that changes how it pays shows up within a day or two: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
+    "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC. For a pool that pays its miners in the coinbase, most of this went straight to the miners; hover the number for the split.",
+    "matured": "The pool's own rewards that are spendable now. Its miners' shares paid in the coinbase are not counted here, or in Moved and Held. Mined at least 100 blocks ago, Mined at least 100 blocks ago, except that coinbases from block 973440 stay locked until block 979920 (about 45 days) under Knots 29.4.2, and count as matured only from there.",
+    "moved": "The pool's own coinbase outputs that have been spent in any later transaction, whether a payout to miners, a consolidation, or a transfer. The chain shows movement, not a sale.",
     "moved_pct": "Moved divided by matured. 100 percent means every spendable reward has left the coinbase address.",
-    "held": "Mined minus moved. Includes rewards that are not yet mature.",
+    "held": "The pool's own rewards not yet moved, including ones not yet mature. A pool that pays its miners in the coinbase holds nothing of theirs; what it holds is its own output, if it takes one.",
     "last_move": "Header time of the latest transaction spending this pool's coinbase outputs, and its shape: payout has 3 or more outputs, sweep gathers several rewards into 1 or 2 outputs, transfer moves one reward to 1 or 2 outputs.",
     "wallet": "Labels merged into one wallet when the same pool address is paid in at least 90 percent of the blocks of both labels, or when pool addresses of both labels are spent together in one transaction, which means one key holder. A pool that lets miners write their own tag shows up here as one wallet with many labels.",
     "wallet_labels": "The other labels whose blocks this wallet collected.",
@@ -2120,18 +2191,26 @@ def render_html(path, sd, st):
         kinds = survey_kinds(sd)
 
         def payout_cell(label, p):
-            if not p["nouts"]:
+            if not p["recent"]:
                 return "-"
-            med = sorted(p["nouts"])[len(p["nouts"]) // 2]
-            dom = 100 * max(p["by_spk"].values()) / p["mined"] if p["mined"] and p["by_spk"] else None
+            med, dom = recent_shape(p["recent"])
             kind = kinds.get(label) or ("individual" if label.startswith("Solo ") else None)
             return tipped(*payout_class(med, dom, kind)[1:])
         for label, p in summ[:12]:
-            pct = f"{100 * p['moved'] / p['matured']:.0f}%" if p["matured"] else "-"
             last = f"{tt(p['last_t'], 'minute')}<br>{E(p['last_kind'])}" if p["last_t"] else "never"
+            mined = f"{p['mined'] / 1e8:.2f}"
+            if p["paid_mined"]:
+                mined = tipped(mined, f"{p['paid_mined'] / 1e8:.2f} BTC of this was paid straight to miners in the coinbase; "
+                                      f"{p['own_mined'] / 1e8:.2f} BTC went to the pool's own address.")
+            if p["own_mined"]:
+                pct = f"{100 * p['own_moved'] / p['own_matured']:.0f}%" if p["own_matured"] else "-"
+                own = (f"<td class=n>{p['own_matured'] / 1e8:.2f}</td><td class=n>{p['own_moved'] / 1e8:.2f}</td><td class=n>{pct}</td>"
+                       f"<td class=n>{(p['own_mined'] - p['own_moved']) / 1e8:.2f}</td>")
+            else:
+                none = tipped("none", "This pool pays its miners in the coinbase and takes no output of its own, so none of the reward sits with the pool.")
+                own = f"<td class=n>{none}</td><td class=n>-</td><td class=n>-</td><td class=n>{none}</td>"
             reward_rows += (f"<tr><td>{E(label)}</td><td class=n>{p['blocks']}</td><td>{template_mix(p['cls'])}</td><td>{payout_cell(label, p)}</td>"
-                            f"<td class=n>{p['mined'] / 1e8:.2f}</td><td class=n>{p['matured'] / 1e8:.2f}</td><td class=n>{p['moved'] / 1e8:.2f}</td><td class=n>{pct}</td>"
-                            f"<td class=n>{(p['mined'] - p['moved']) / 1e8:.2f}</td><td class=t>{last}</td></tr>")
+                            f"<td class=n>{mined}</td>{own}<td class=t>{last}</td></tr>")
         latest = sorted(rw.d["coinbases"].values(), key=lambda c: -c["h"])[:20]
         for c in latest:
             reward_total = sum(v for _, v in c["outs"].values())
@@ -2709,7 +2788,7 @@ def report(sd, st):
               f"named-label overlaps {len(rw.overlaps())}")
         for label, p in rw.summary(st.get("tip_height", 0))[:8]:
             print(f"  {label[:22]:22s} blocks {p['blocks']:5d}  mined {p['mined'] / 1e8:9.3f}  moved {p['moved'] / 1e8:9.3f}  "
-                  f"held {(p['mined'] - p['moved']) / 1e8:9.3f}  last {ts(p['last_t']) if p['last_t'] else '-'}")
+                  f"held {(p['own_mined'] - p['own_moved']) / 1e8:9.3f}  last {ts(p['last_t']) if p['last_t'] else '-'}")
     ev_path = os.path.join(sd, "events.jsonl")
     if not os.path.exists(ev_path):
         print("no events")
