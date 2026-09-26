@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#2d4b25"/>
+  <rect x="0" y="600" width="1200" height="30" fill="#f7931a"/>
+  <text x="80" y="250" font-family="DejaVu Serif, Georgia, serif" font-size="96" font-weight="700" fill="#ffffff">reorg.watch</text>
+  <text x="80" y="340" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" fill="#d9e3d3">Reorgs, pool shares and block rewards</text>
+  <text x="80" y="395" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="40" fill="#d9e3d3">on Bitcoin's BLAKE2b chain</text>
+  <text x="80" y="510" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="34" fill="#f7931a">Mine with your own node</text>
+</svg>

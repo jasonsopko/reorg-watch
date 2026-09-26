@@ -2181,6 +2181,19 @@ def render_html(path, sd, st):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="600">
 <title>Bitcoin Knots reorg watch</title>
+<meta name="description" content="Chain reorganizations, pool shares and block rewards on Bitcoin's BLAKE2b chain, measured from one Bitcoin Knots node. An independent monitor.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="reorg.watch">
+<meta property="og:title" content="Bitcoin Knots reorg watch">
+<meta property="og:description" content="Chain reorganizations, pool shares and block rewards on Bitcoin's BLAKE2b chain, measured from one Bitcoin Knots node.">
+<meta property="og:url" content="https://reorg.watch/">
+<meta property="og:image" content="https://reorg.watch/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Bitcoin Knots reorg watch">
+<meta name="twitter:description" content="Chain reorganizations, pool shares and block rewards on Bitcoin's BLAKE2b chain, measured from one Bitcoin Knots node.">
+<meta name="twitter:image" content="https://reorg.watch/og.png">
 <style>
 html {{ font-size: 17.5px; }}
 :root {{
