@@ -521,12 +521,48 @@ def recent_shape(coinbases):
     return med, dom
 
 
-def payout_class(med, dom, kind):
+def survey_own_addresses(sd):
+    """Label to the set of addresses the pool survey records as that pool's own (its fee
+    address, say), from pool-survey.json; empty without it."""
+    try:
+        sv = json.load(open(os.path.join(sd, "pool-survey.json")))
+    except Exception:
+        return {}
+    return {r["label"]: set(r.get("own_addresses") or []) for r in sv.get("pools", []) if r.get("label")}
+
+
+def own_share(coinbases, own_addrs):
+    """(largest recipient is one of own_addrs, percent of value to own_addrs) over the coinbases
+    given, or None when the pool has no known addresses."""
+    if not own_addrs:
+        return None
+    by_spk, total = {}, 0
+    for c in coinbases:
+        for spk, v in c["outs"].values():
+            by_spk[spk] = by_spk.get(spk, 0) + v
+            total += v
+    if not total:
+        return None
+    top = max(by_spk, key=by_spk.get)
+    own = sum(v for spk, v in by_spk.items() if spk_to_address(bytes.fromhex(spk)) in own_addrs)
+    return spk_to_address(bytes.fromhex(top)) in own_addrs, 100 * own / total
+
+
+def own_from_survey(oc):
+    """The same pair from the survey's on-chain facts, or None."""
+    if not oc or not oc.get("own_known"):
+        return None
+    return bool(oc.get("dominant_is_own")), oc.get("own_pct") or 0
+
+
+def payout_class(med, dom, kind, own=None):
     """One reading of how the reward leaves a label's coinbases, shared by every table on the
     page and by pools.json so they cannot disagree. med is the median number of value-bearing
     outputs, dom the percentage of all value paid to the single most-paid script, kind the
     survey's kind for the label (pool, individual, marketplace, category) or None when the
-    label is not in the survey. Returns (key, short text, one-sentence detail)."""
+    label is not in the survey. own is (largest recipient is the pool's own address, percent
+    to the pool's own addresses) when the survey knows the pool's addresses, else None.
+    Returns (key, short text, one-sentence detail)."""
     if med is None:
         return "none", "no blocks attributed", "No coinbase of this label is in the index."
     outs = f"{med} output{'s' if med != 1 else ''} per block"
@@ -537,6 +573,10 @@ def payout_class(med, dom, kind):
     if dom is not None and dom < 50:
         return ("finder", "paid to the finder in the coinbase",
                 f"{outs}, but to a different address from block to block ({top}), so whoever found the block was paid in it.")
+    if kind == "pool" and own is not None and not own[0]:
+        return ("elsewhere", "paid in the coinbase to one address, not the pool's",
+                f"{outs}, {top}. That address is not one of the pool's known addresses; the pool's own address takes "
+                f"{own[1]:.0f}%, usually its fee. Whose address it is cannot be read from the chain.")
     if kind == "pool":
         return ("held", "held by the pool, paid later",
                 f"{outs}, {top}: the pool receives every reward and pays miners afterwards from its balance. Earlier versions of this page called this pool custody.")
@@ -1019,7 +1059,7 @@ TIPS = {
     "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
     "hourshare": "This pool's share of that hour's blocks. The three columns are the three largest pools of the day. Cells at or above half are marked.",
     "blocks_fork": "All blocks this label has mined since the BLAKE2b fork block.",
-    "payout": "How the reward leaves this label's blocks, read from its last 20 coinbases, so a pool that changes how it pays shows up within a day or two: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
+    "payout": "How the reward leaves this label's blocks, read from its last 20 coinbases, so a pool that changes how it pays shows up within a day or two: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Paid in the coinbase to one address, not the pool's: one or two outputs with most of the value to an address that is not one of the pool's known addresses, while the pool's own address takes a small share such as its fee. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
     "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC. For a pool that pays its miners in the coinbase, most of this went straight to the miners; hover the number for the split.",
     "matured": "The pool's own rewards that are spendable now. Its miners' shares paid in the coinbase are not counted here, or in Moved and Held. Mined at least 100 blocks ago, Mined at least 100 blocks ago, except that coinbases from block 973440 stay locked until block 979920 (about 45 days) under Knots 29.4.2, and count as matured only from there.",
     "moved": "The pool's own coinbase outputs that have been spent in any later transaction, whether a payout to miners, a consolidation, or a transfer. The chain shows movement, not a sale.",
@@ -1047,7 +1087,7 @@ TIPS = {
     "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
     "choose_datum": "Whether the pool runs a DATUM service that your own DATUM gateway can connect to: yes when a pool pubkey and endpoint are published, or the endpoint alone, or the site documents DATUM mining without naming a host. The fee is what the pool's site says, read on the date in pools.json.",
     "choose_sv1": "Public stratum v1 endpoints that answered a probe. The fee is what the pool's site says, read on the date in pools.json.",
-    "choose_paid": "Measured from this pool's coinbases over the survey window, not taken from its site: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Held by the pool, paid later: one or two outputs with most of the value to one address. Paid in the coinbase: the miners, or the finder, are paid in the block itself.",
+    "choose_paid": "Measured from this pool's last 20 coinbases, not taken from its site: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Held by the pool, paid later: one or two outputs with most of the value to one address. Paid in the coinbase: the miners, or the finder, are paid in the block itself.",
     "choose_trust_v1": "On a public stratum v1 port the pool's node always builds the block, so you hand it the choice of transactions. Whether it also holds your reward is the measured payout column.",
     "choose_trust_gw": "With your own DATUM gateway your node builds the block and the pool only sets the coinbase outputs. Neither means the block is yours and the reward reaches you in the coinbase. You still rely on the pool's share accounting, which you can check in every block.",
     "risk_share": "The pool that found the most blocks in the window, and its share. Names come from the coinbase, so this is the share of a label; the wallet table below merges labels that share a wallet.",
@@ -1474,7 +1514,7 @@ def render_survey(sd, E):
         klass = " class=note" if cons == "not testable" else ""
         rows += (f'<tr><td>{E(r["label"])}</td><td class=n>{share if share is not None else "-"}</td>'
                  f'<td>{eps}</td><td>{sw}</td><td>{E(r.get("datum","-"))}</td><td>{cls}</td>'
-                 f'<td>{tipped(*payout_class(oc.get("median_outputs"), oc.get("dominant_script_pct"), kind)[1:])}</td>'
+                 f'<td>{tipped(*payout_class(oc.get("median_outputs"), oc.get("dominant_script_pct"), kind, own_from_survey(oc))[1:])}</td>'
                  f'<td{klass} title="{E(r.get("consistency_why",""))}">{E(cons)}</td></tr>')
     if not rows:
         return ""
@@ -1809,8 +1849,8 @@ def choose_rows(sd, week, week_total, canaries):
         label = r["label"]
         n7 = week.get(label, 0) if week is not None and oc else None
         med, dom = oc.get("median_outputs"), oc.get("dominant_script_pct")
-        pkey, paid, pdetail = payout_class(med, dom, "pool")
-        custody = {"held": True, "finder": False, "coinbase": False}.get(pkey)
+        pkey, paid, pdetail = payout_class(med, dom, "pool", own_from_survey(oc))
+        custody = {"held": True, "finder": False, "coinbase": False, "elsewhere": False}.get(pkey)
         v1 = [e["endpoint"] for e in probed if e.get("verdict") == "stratum-v1"]
         v1_listed = any(e.get("expect") == "stratum-v1" for e in eps)
         dstat = r.get("datum") or ""
@@ -2189,13 +2229,14 @@ def render_html(path, sd, st):
             return ", ".join(tipped(CLASS_NAMES[k] + (f" {100 * v / n:.0f}%" if len(top) > 1 else ""), CLASS_TIPS[k]) for k, v in top[:2])
 
         kinds = survey_kinds(sd)
+        owns = survey_own_addresses(sd)
 
         def payout_cell(label, p):
             if not p["recent"]:
                 return "-"
             med, dom = recent_shape(p["recent"])
             kind = kinds.get(label) or ("individual" if label.startswith("Solo ") else None)
-            return tipped(*payout_class(med, dom, kind)[1:])
+            return tipped(*payout_class(med, dom, kind, own_share(p["recent"], owns.get(label)))[1:])
         for label, p in summ[:12]:
             last = f"{tt(p['last_t'], 'minute')}<br>{E(p['last_kind'])}" if p["last_t"] else "never"
             mined = f"{p['mined'] / 1e8:.2f}"
@@ -2494,7 +2535,7 @@ html.js section.tab {{ display: none; }}
 <tr>{th("Pool", "pool")}{th("Blocks", "blocks_fork", "n")}{th("Template built by", "builder")}{th("Coinbase payout", "payout")}{th("Mined BTC", "mined", "n")}{th("Matured", "matured", "n")}{th("Moved", "moved", "n")}{th("Moved / matured", "moved_pct", "n")}{th("Held", "held", "n")}{th("Last movement", "last_move")}</tr>
 {reward_rows or "<tr><td colspan=10 class=note>none</td></tr>"}
 </table></div>
-<p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: a gateway with a DATUM pool upstream built the block and the pool only set the payout; that gateway is normally the miner's own, though a pool's public stratum port served by the pool's own gateway looks the same. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block, read from the coinbases: <em>paid to miners in the coinbase</em> (three or more outputs), <em>paid to the finder in the coinbase</em> (one or two outputs, to a different address each block), or <em>held by the pool, paid later</em> (one or two outputs, most of the value to one address; earlier versions of this page called this pool custody). Hover or tap a cell for the numbers behind it.</p>
+<p class="note"><strong>Template built by</strong> comes from the coinbase layout the DATUM gateway writes. <em>DATUM pool</em>: a gateway with a DATUM pool upstream built the block and the pool only set the payout; that gateway is normally the miner's own, though a pool's public stratum port served by the pool's own gateway looks the same. <em>Gateway, stratum v1</em>: the gateway software running standalone, so the node of whoever owns the payout address built the block; for a pool label that is the pool. <em>Other</em>: software this page does not recognize. <strong>Coinbase payout</strong> is how the reward leaves the block, read from the coinbases: <em>paid to miners in the coinbase</em> (three or more outputs), <em>paid to the finder in the coinbase</em> (one or two outputs, to a different address each block), <em>paid in the coinbase to one address, not the pool's</em> (one or two outputs, most of the value to an address that is not one of the pool's known addresses, while the pool's own address takes only a small share), or <em>held by the pool, paid later</em> (one or two outputs, most of the value to one address; earlier versions of this page called this pool custody). Hover or tap a cell for the numbers behind it.</p>
 <h2>Latest blocks</h2>
 <div class="wrap"><table class="stack wide dense">
 <tr>{th("Height", "height", "n")}{th("Time", "time")}{th("Pool", "pool")}{th("Template built by", "builder")}{th("Coinbase tags", "tags")}{th("Header", "hdr")}{th("Txs", "txs", "n")}{th("Outputs", "outputs", "n")}{th("Reward BTC", "reward", "n")}{th("Fees BTC", "fees", "n")}</tr>
