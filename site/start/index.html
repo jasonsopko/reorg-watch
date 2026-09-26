@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mine with your own node</title>
+<meta name="description" content="What running your own Bitcoin node and DATUM gateway changes for a miner, what it costs, and how to set it up. From reorg.watch, an independent monitor.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="reorg.watch">
+<meta property="og:title" content="Mine with your own node">
+<meta property="og:description" content="What running your own Bitcoin node and DATUM gateway changes for a miner, what it costs, and how to set it up.">
+<meta property="og:url" content="https://reorg.watch/start/">
+<meta property="og:image" content="https://reorg.watch/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mine with your own node">
+<meta name="twitter:description" content="What running your own Bitcoin node and DATUM gateway changes for a miner, what it costs, and how to set it up.">
+<meta name="twitter:image" content="https://reorg.watch/og.png">
+<style>
+:root {
+  color-scheme: light dark;
+  --ink: #171717; --paper: #f6f3ee; --card: #ffffff; --rule: #dcd5c8; --mute: #6b675f;
+  --orange: #f7931a; --green: #2d4b25; --band: #2d4b25; --band-ink: #ffffff; --band-sub: #d9e3d3; --link: #2d4b25;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --ink: #f2f2f2; --paper: #171717; --card: #222222; --rule: #3a3a3a; --mute: #a09a90;
+  --green: #9ccc65; --band: #1f3519; --band-ink: #f2f2f2; --band-sub: #b7c7ad; --link: #9ccc65;
+} }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 Manjari, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+header { background: var(--band); color: var(--band-ink); }
+.bar, main, footer { max-width: 44rem; margin: 0 auto; padding-left: 1rem; padding-right: 1rem; }
+.bar { padding-top: 1.6rem; padding-bottom: 1.3rem; }
+h1 { margin: 0; font: 700 1.7rem/1.2 "Martel Sans", Georgia, "Times New Roman", serif; }
+.sub { margin: .35rem 0 0; color: var(--band-sub); }
+.lead { font-size: 1.15rem; margin: 1.6rem 0 0; }
+h2 { font: 700 1.15rem/1.25 "Martel Sans", Georgia, "Times New Roman", serif; color: var(--green); margin: 2.2rem 0 .6rem; padding-bottom: .35rem; border-bottom: 2px solid var(--orange); }
+ul { padding-left: 1.2rem; } li { margin: .35rem 0; }
+dl { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .8rem 1rem; margin: 1.4rem 0 0; }
+dt { font-weight: 700; margin-top: .5rem; } dt:first-child { margin-top: 0; } dd { margin: 0; }
+.setups { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+.setup { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .8rem 1rem; }
+.setup strong { display: block; color: var(--green); }
+.note { color: var(--mute); font-size: .95rem; }
+footer { color: var(--mute); font-size: .9rem; padding-top: 2rem; padding-bottom: 3rem; border-top: 1px solid var(--rule); margin-top: 2.5rem; }
+</style>
+</head>
+<body>
+<header><div class="bar">
+<h1>Mine with your own node</h1>
+<p class="sub">For anyone who owns or rents hashpower on Bitcoin's BLAKE2b proof of work.</p>
+</div></header>
+<main>
+
+<p class="lead">Run your own node and DATUM gateway, and two things change. Your node chooses the transactions in the blocks you mine. And on a pool that pays in the block, your reward goes straight to your own address.</p>
+
+<dl>
+<dt>Node</dt><dd>A computer running Bitcoin software (here, Bitcoin Knots) that checks every block for itself.</dd>
+<dt>Block template</dt><dd>The draft block a miner works on. Whoever builds it decides which transactions go in.</dd>
+<dt>Coinbase</dt><dd>The first transaction in a block. It pays out the block reward.</dd>
+<dt>DATUM</dt><dd>A way to mine with a pool while your own node builds the block template.</dd>
+<dt>Gateway</dt><dd>The DATUM software that sits between your miners and your node.</dd>
+</dl>
+
+<h2>On a pool's usual mining port</h2>
+<p>Point a miner at a pool's usual mining port (Stratum) and the pool's node builds every block. The pool decides which transactions go in and which are left out.</p>
+<p>Pools also differ in where the reward goes. Some pools are paid the whole reward in the coinbase and pay their miners later. Others pay each miner directly in the coinbase, inside the block itself. <a href="/#choose">Choosing a pool</a> shows which pools do which, measured from their blocks on the chain rather than from what the pools say.</p>
+
+<h2>With your own node and gateway</h2>
+<p>Your node builds the block template, and the gateway hands the work to your miners. Mining with a pool, the gateway also sends the pool proof of the work your miners do. The pool counts it and sets how each reward is split, but it does not choose the transactions.</p>
+<p>On a pool that pays in the block, your share of each reward is in the coinbase at your address. Some of these pools only pay you in the block once your share passes a minimum, called a payout threshold. Below it, the pool holds your earnings until they add up. Mining solo, a block you find pays you in full, in the block.</p>
+
+<h2>What it costs</h2>
+<ul>
+<li><strong>A computer that stays on.</strong> A spare PC or mini PC at home running Linux, or a rented server if you rent hashpower. For a new node, 4 GB of memory and 60 GB of free disk is comfortable.</li>
+<li><strong>A day or more to sync.</strong> A new node downloads and checks the whole chain before your miners can connect: about 800 GB of internet data, though it keeps far less on disk. If you already run a Bitcoin Knots node, the gateway can use that one.</li>
+<li><strong>About an hour of your time</strong> to set it up. After that it runs by itself and starts again after a reboot.</li>
+<li><strong>Keeping it running.</strong> If your node stops, your miners stop. They do not fall back to someone else's template.</li>
+<li><strong>Waiting to spend.</strong> Block rewards on this chain currently take about 45 days to become spendable. That applies to every miner, whatever the setup.</li>
+</ul>
+
+<h2>Which setup fits you</h2>
+<div class="setups">
+<div class="setup"><strong>An ASIC at home</strong>Run it on a computer at home. Your miner connects over your home network, and nothing is exposed to the internet. <a href="https://github.com/jasonsopko/knots-datum-node#which-setup-is-right-for-you">Setup guide</a></div>
+<div class="setup"><strong>Rented hashpower</strong>Run it on a rented server the rental service can reach. Check the provider allows it first. <a href="https://github.com/jasonsopko/knots-datum-node#choosing-a-server">Choosing a server</a></div>
+<div class="setup"><strong>You already run a node</strong>The gateway can use a Bitcoin Knots node you already run, and skip the download. <a href="https://github.com/jasonsopko/knots-datum-node#your-settings">Using your node</a></div>
+</div>
+<p>The installer, <a href="https://github.com/jasonsopko/knots-datum-node">knots-datum-node</a>, is free and open source. It asks a few plain questions, runs without administrator rights after a short setup, and shows everything it would do before it changes anything.</p>
+
+<h2>Choosing a pool</h2>
+<p>The installer offers pools that publish their DATUM connection details and have been seen on the chain paying their miners in the block, and solo mining. <a href="/#choose">Choosing a pool</a> has the full measured list, including pools that hold rewards.</p>
+
+<h2>Getting help</h2>
+<!-- PLACEHOLDER: the maintainer chooses the support channel. -->
+<p>Where to ask for help: to be announced.</p>
+
+</main>
+<footer>
+<p>reorg.watch is an independent monitor, not affiliated with the Bitcoin Knots project. Source: <a href="https://github.com/jasonsopko/reorg-watch">reorg-watch</a> and <a href="https://github.com/jasonsopko/knots-datum-node">knots-datum-node</a>.</p>
+</footer>
+</body>
+</html>
