@@ -195,6 +195,12 @@ class Rest:
 class Pools:
     def __init__(self, cache, verbose=False):
         self.by_addr = {}
+        # Every name an address is listed under. The list sometimes files one
+        # address under two entries (OmegaPool's payout outputs also sit in
+        # "Nutty", a miner who mines through OmegaPool with his own secondary
+        # tag); by_addr keeps only the last, which hid OmegaPool from the
+        # tag-plus-payout rule below.
+        self.names_by_addr = {}
         self.tags = []
         stale = not os.path.exists(cache) or NOW - os.path.getmtime(cache) > 6 * 3600
         if stale:
@@ -216,6 +222,7 @@ class Pools:
                 for e in json.load(f):
                     for a in e.get("addresses", []):
                         self.by_addr[a] = e["name"]
+                        self.names_by_addr.setdefault(a, set()).add(e["name"])
                     for t in e.get("tags", []):
                         if t:
                             self.tags.append((t, e["name"]))
@@ -224,12 +231,13 @@ class Pools:
     def identify(self, addrs, tag):
         hits = [n for t, n in self.tags if t in tag]  # longest tag first
         paid = [self.by_addr[a] for a in addrs if a in self.by_addr]
+        paid_any = set().union(*(self.names_by_addr.get(a, ()) for a in addrs))
         # A pool that signs the coinbase and is paid in it built the block.
         # Lazarus pays its miners in the coinbase, so a listed solo miner is
         # often the first payout there; the tag plus the pool's own output
         # outrank a payee.
         for n in hits:
-            if n in paid:
+            if n in paid_any:
                 return n
         by_tag = hits[0] if hits else None
         for n in paid:
