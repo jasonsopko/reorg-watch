@@ -1908,7 +1908,7 @@ def node_tab_html(ranked, day_n):
 <p>It is more work than typing a pool's address into your miner. The difference is who decides what your hashpower builds. If everyone who can run a node does, the chain does not depend on a few operators behaving well.</p>
 
 <h2>Get started</h2>
-<p><a href="{NODE_REPO}">knots-datum-node</a> sets up a DATUM gateway and, if you need one, a Bitcoin Knots node on your own Linux computer. It asks a few plain questions, runs without root after a short administrator setup, shows everything it would do with <code>--dry-run</code> before it changes anything, and gives you a dashboard to see your miners. It is free and open source (MIT). The first release, 0.1.0, is being tested now.</p>
+<p><a href="{NODE_REPO}">knots-datum-node</a> sets up a DATUM gateway and, if you need one, a Bitcoin Knots node on your own Linux computer. It asks a few plain questions, runs without root after a short administrator setup, shows everything it would do with <code>--dry-run</code> before it changes anything, and gives you a dashboard to see your miners. It is free and open source (MIT).</p>
 <ul class="how">
 <li><strong>You bought an ASIC and it is at home:</strong> run it on a computer at home, and point your miner at that computer over your home network.</li>
 <li><strong>You rent hashpower:</strong> run it on a rented server the rental service can reach. Check that the provider allows it first; the README has notes on that.</li>
