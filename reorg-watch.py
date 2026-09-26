@@ -76,6 +76,7 @@ POOLS_URL = "https://raw.githubusercontent.com/Kilombino/mempool-bip110/main/poo
 POOLS_REPO = "https://github.com/Kilombino/mempool-bip110"
 UA = "reorg-watch/1.1 (Bitcoin Knots node monitor)"
 REPO_URL = "https://github.com/jasonsopko/reorg-watch"
+NODE_REPO = "https://github.com/jasonsopko/knots-datum-node"
 # Early warnings for hashrate concentration. Each fires once per window per pool.
 SHARE_ALERT = 0.45        # one pool's share of the last 6 hours
 SHARE_MIN_BLOCKS = 40     # and at least this many blocks in those 6 hours
@@ -976,7 +977,7 @@ TIPS = {
     "event": "Reorgs name the pools on both sides. Explorer and node events say which check failed and for how many consecutive runs.",
 }
 # The page's tabs, in order. The first is the one it opens on.
-TABS = [("reorgs", "Reorgs"), ("share", "Pool share"), ("rewards", "Rewards"), ("choose", "Choosing a pool"), ("method", "Method")]
+TABS = [("reorgs", "Reorgs"), ("share", "Pool share"), ("rewards", "Rewards"), ("choose", "Choosing a pool"), ("node", "Run your own node"), ("method", "Method")]
 
 CLASS_TIPS = {
     "D": "Unique-id push of 7 or more bytes: the gateway that built this template had a DATUM pool upstream, so the pool could not choose the transactions. That gateway is normally the miner's own; a pool's public stratum port served by the pool's own gateway looks the same, and then the pool's node built the block.",
@@ -1871,6 +1872,55 @@ the on-chain share come from this site's own coinbase index. Survey generated {E
 """
 
 
+def node_tab_html(ranked, day_n):
+    """The "Run your own node" tab: why, what it takes, and where to get the installer.
+    ranked is the day's (pool, blocks) list, largest first."""
+    E = html.escape
+    if day_n and ranked:
+        top_v = f"{E(ranked[0][0])}, {100 * ranked[0][1] / day_n:.0f}% of blocks"
+        two = ranked[:2]
+        two_v = f"{' and '.join(E(n) for n, _ in two)}, {100 * sum(c for _, c in two) / day_n:.0f}% of blocks"
+    else:
+        top_v = two_v = "no blocks yet"
+    return f"""<h2>Run your own node</h2>
+<p>Every block is built by some node. That node chooses which transactions go in the block and which are left out. When a few pools build the templates for most of the hashrate, a few nodes make that choice for everyone, and the miners doing the work have no say in it.</p>
+<p>DATUM changes that. Your own node builds the block template, and your miners work on it. You can still mine with a pool for steady payouts: the pool counts your work and splits the reward, but it does not choose what goes in your blocks.</p>
+<div class="cards">
+<div class="card"><div class="k">Largest pool, last 24 h</div><div class="v">{top_v}</div></div>
+<div class="card"><div class="k">Two largest pools, last 24 h</div><div class="v">{two_v}</div></div>
+</div>
+<p class="note">Running DATUM software is not the same as building your own template: a pool can run a DATUM gateway as its own front end and still build every template on its own node. What counts is whose node builds the block.</p>
+
+<h2>Why it is worth the trouble</h2>
+<ul class="how">
+<li><strong>What goes in a block.</strong> A pool that builds every template for its miners is one place where transactions can be left out, by policy, under pressure, or by mistake. Thousands of miners each building their own blocks cannot all be leaned on at once.</li>
+<li><strong>Who can rewrite recent history.</strong> A pool near half the hashrate can reorganize the chain on its own; the <a href="#share">Pool share</a> tab shows how close any pool is. Hashpower spread across many operators, each with its own node, takes that option away from everyone.</li>
+<li><strong>Who checks the rules.</strong> A node that checks every block for itself takes no one's word for what is valid. The more of them there are, the harder it is to change the rules without everyone agreeing.</li>
+</ul>
+
+<h2>What it takes from you</h2>
+<ul class="how">
+<li><strong>A computer that stays on.</strong> A spare PC or mini PC at home running Linux, or a rented server if you rent hashpower. No special hardware.</li>
+<li><strong>A day to sync.</strong> A new node downloads and checks the whole chain before your miners can connect: a day or more and about 800 GB of internet data, but only about 40 GB of disk. If you already run a Bitcoin Knots node, the gateway can use that one instead.</li>
+<li><strong>About an hour of your time</strong> to set it up. After that it runs by itself, starts again after a reboot, and updates with one command.</li>
+<li><strong>Keeping it running.</strong> If your node is down, your miners stop; they do not fall back to someone else's template. The blocks are yours, and so is the job of keeping them coming.</li>
+</ul>
+<p>It is more work than typing a pool's address into your miner. The difference is who decides what your hashpower builds. If everyone who can run a node does, the chain does not depend on a few operators behaving well.</p>
+
+<h2>Get started</h2>
+<p><a href="{NODE_REPO}">knots-datum-node</a> sets up a DATUM gateway and, if you need one, a Bitcoin Knots node on your own Linux computer. It asks a few plain questions, runs without root after a short administrator setup, shows everything it would do with <code>--dry-run</code> before it changes anything, and gives you a dashboard to see your miners. It is free and open source (MIT). The first release, 0.1.0, is being tested now.</p>
+<ul class="how">
+<li><strong>You bought an ASIC and it is at home:</strong> run it on a computer at home, and point your miner at that computer over your home network.</li>
+<li><strong>You rent hashpower:</strong> run it on a rented server the rental service can reach. Check that the provider allows it first; the README has notes on that.</li>
+<li><strong>You already run a Bitcoin Knots node</strong>, such as an Umbrel, a Start9 or a Knots box: it can use that node and skip the download.</li>
+</ul>
+<p>Start with the <a href="{NODE_REPO}#readme">README on GitHub</a>; it walks through every step. Every commit is signed, the script checks the Knots release signature, and it builds the gateway from one fixed commit. Read it before you run it.</p>
+
+<h2>Pool or solo</h2>
+<p>With a DATUM pool you get a share of every block the pool finds, split by your share of recent work. Solo pays you the whole reward for any block you find, and nothing otherwise. The installer defaults to CONVOY because it is the DATUM pool running on this chain today. Any DATUM pool works, and this site does not endorse one; <a href="#choose">Choosing a pool</a> shows how each pool's blocks are built and paid.</p>
+"""
+
+
 def render_html(path, sd, st):
     E = html.escape
     now = NOW
@@ -1932,6 +1982,7 @@ def render_html(path, sd, st):
     if os.path.exists(os.path.join(sd, "rewards.json")):
         cls_by_h = {c["h"]: c.get("cls", "O") for c in Rewards(sd).d["coinbases"].values()}
     day_h = {h: b for h, b in blocks if now - b["time"] <= 86400}
+    node_html = node_tab_html(ranked, len(day))
 
     def builder_mix(group):
         cnt = {}
@@ -2357,6 +2408,10 @@ html.js section.tab {{ display: none; }}
 <section class="tab" id="choose">
 {choose_html}
 {survey_html}
+</section>
+
+<section class="tab" id="node">
+{node_html}
 </section>
 
 <section class="tab" id="method">
