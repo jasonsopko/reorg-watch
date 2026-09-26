@@ -2335,7 +2335,7 @@ html.js section.tab {{ display: none; }}
 <p class="sub">Chain reorganizations and pool shares on the BLAKE2b chain, from one Bitcoin Knots node. Generated {tt(now)}. Times are shown in your browser's time zone, <span class="tzname">{E(tsz(now, "%Z"))}</span> right now.</p></div></div></header>
 {nav}
 <main>
-<div id="stale">This page is more than 15 minutes old. The generator or the upload has stopped; treat everything below as stale.</div>
+<div id="stale" hidden></div>
 
 <section class="tab" id="reorgs">
 <div class="cards">
@@ -2475,12 +2475,15 @@ html.js section.tab {{ display: none; }}
 (function () {{
   var gen = 1000 * parseInt(document.querySelector('.sub time[data-epoch]').getAttribute('data-epoch'), 10);
   var box = document.getElementById('stale');
-  var show = function (msg) {{ box.textContent = msg; box.style.display = 'block'; }};
+  // Empty and hidden in the HTML, so link previews and readers without JavaScript see only the
+  // generation time above; shown here only when the page really is old.
+  var show = function (msg) {{ box.textContent = msg; box.hidden = false; }};
+  var hide = function () {{ box.hidden = true; }};
   // Fallback only when the origin is unreachable: judge by the device clock, which may be wrong.
   var deviceCheck = function () {{
     var mins = Math.round((Date.now() - gen) / 60000);
     if (!isNaN(mins) && mins > 20) show('This copy is about ' + mins + ' minutes old by your device clock. If the clock is right, the page stopped updating.');
-    else box.style.display = 'none';
+    else hide();
   }};
   // Authoritative check: ask the origin its time and how old the current page is. Device clock not used.
   var serverCheck = function () {{
@@ -2494,10 +2497,10 @@ html.js section.tab {{ display: none; }}
         var m = html.match(/class="sub"[\\s\\S]*?data-epoch="(\\d+)"/);
         var live = m ? 1000 * parseInt(m[1], 10) : NaN;
         if (!isNaN(serverNow) && !isNaN(live) && serverNow - live > 15 * 60000)
-          show('The page has not regenerated for ' + Math.round((serverNow - live) / 60000) + ' minutes. The generator or upload has stopped.');
+          show('The page has not regenerated for ' + Math.round((serverNow - live) / 60000) + ' minutes. The page generator has stopped; treat everything below as stale.');
         else if (!isNaN(live) && live - gen > 5 * 60000)
           show('You are viewing a cached copy from ' + Math.round((live - gen) / 60000) + ' minutes ago. Reload for the current page.');
-        else box.style.display = 'none';
+        else hide();
       }});
     }}).catch(deviceCheck);
   }};
