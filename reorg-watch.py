@@ -1898,7 +1898,7 @@ def node_tab_html(ranked, day_n):
 <li><strong>Who checks the rules.</strong> A node that checks every block for itself takes no one's word for what is valid. The more of them there are, the harder it is to change the rules without everyone agreeing.</li>
 </ul>
 
-<h2>What it takes from you</h2>
+<h2>What you need to run a node</h2>
 <ul class="how">
 <li><strong>A computer that stays on.</strong> A spare PC or mini PC at home running Linux, or a rented server if you rent hashpower. No special hardware.</li>
 <li><strong>A day to sync.</strong> A new node downloads and checks the whole chain before your miners can connect: a day or more and about 800 GB of internet data, but only about 40 GB of disk. If you already run a Bitcoin Knots node, the gateway can use that one instead.</li>
