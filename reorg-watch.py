@@ -1087,6 +1087,7 @@ TIPS = {
     "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
     "choose_datum": "Whether the pool runs a DATUM service that your own DATUM gateway can connect to. Verified means this site completed a real DATUM handshake with the pool's published pubkey, the opening exchange a gateway makes, and closed the session; the time is when. Published, failing means the endpoint and key are on the pool's site but the last handshake failed, with the reason. No pubkey means the service cannot be verified, only the port checked. The fee is what the pool's site says, read on the date in pools.json.",
     "choose_sv1": "Public stratum v1 endpoints that answered a probe with work for this chain. Ports come from the pool's own pages, read every hour, as well as this site's list, so a port a page adds is probed the next hour. Closed means the pool's own site says the path is closed, whatever the port still answers. The fee is what the pool's site says, read on the date in pools.json.",
+    "choose_claims": "What the pool's own pages claim, next to what this site's probe found, checked every hour: a path the site calls closed (do its ports still answer a subscribe and hand out work for this chain?), the DATUM service the site publishes (does a real handshake verify it?), and the stratum ports the page lists (do they answer?). Agrees and differs are the probe's reading of the pool's own words. On a port the site calls closed the probe also authorizes a throwaway worker and watches whether the pool accepts it and keeps sending work. That is as far as it goes: it never submits a share, so whether shares sent there are credited or paid is not measured.",
     "choose_changes": "What pools changed lately: dated statements from their own pages, and what the chain shows. The chain part is measured from this site's coinbase index, day by day: when a pool's blocks switched between being built by its own stratum server and through DATUM gateways with the pool upstream, and when the number of coinbase outputs changed size class. A switch is reported once it has held for a full day. Gateway names are the distinct second coinbase tags seen in the pool's blocks that day.",
     "choose_paid": "Measured from this pool's last 20 coinbases, not taken from its site: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Held by the pool, paid later: one or two outputs with most of the value to one address. Paid in the coinbase: the miners, or the finder, are paid in the block itself.",
     "choose_trust_v1": "On a public stratum v1 port the pool's node always builds the block, so you hand it the choice of transactions. Whether it also holds your reward is the measured payout column.",
@@ -1864,7 +1865,7 @@ def choose_rows(sd, week, week_total, canaries):
         # and one the pool's own site calls closed is not offered even while it answers.
         v1_all = [e for e in probed if e.get("verdict") == "stratum-v1"]
         v1 = [e["endpoint"] for e in v1_all if e.get("chain") != "other" and not e.get("closed")]
-        v1_listed = any(e.get("expect") == "stratum-v1" for e in eps)
+        v1_listed = any(e.get("expect") == "stratum-v1" and not e.get("closed") for e in eps)
         dstat = r.get("datum") or ""
         dshort = next((short for k, short in DATUM_SHORT if dstat.startswith(k)), "not found")
         datum_ok = dshort in DATUM_AVAILABLE
@@ -1900,6 +1901,7 @@ def choose_rows(sd, week, week_total, canaries):
             "datum_offered": datum_ok,
             "site": {"read": site.get("read"), "pages": len(site.get("pages") or []), "discovered": site.get("discovered") or []},
             "changes": {"onchain": r.get("onchain_changes") or [], "gateway_names": r.get("gateway_names_today")},
+            "claims": r.get("claims") or [],
             "canary": {path: canaries[(label, path)] for path in ("sv1", "datum") if (label, path) in canaries},
             "terms": terms,
             "consistency": r.get("consistency", "-"),
@@ -1964,8 +1966,15 @@ def render_choose(rows, generated, changes, E):
         closed = s.get("closed") or {}
         note = ""
         if closed:
-            note = "<br>" + tipped("closed per the site " + str(closed.get("date", "")),
-                                   (str(closed.get("what", "")) + ". " + str(closed.get("source", ""))).strip(". "), "warn")
+            cl = next((c for c in x["claims"] if c["kind"] == "closure"), None)
+            detail = (cl["claim"] + "; " + cl["found"] + ". " + str(closed.get("source", ""))) if cl else \
+                (str(closed.get("what", "")) + ", " + str(closed.get("date", "")) + ". " + str(closed.get("source", "")))
+            if cl and cl["agree"] is False:
+                note = "<br>" + tipped("site says closed, port still answers", detail, "warn")
+            elif cl and cl["agree"]:
+                note = "<br>" + tipped("site says closed, port refused", detail, "ok")
+            else:
+                note = "<br>" + tipped("site says closed", detail, "warn")
         if not s["endpoints"]:
             base = '<span class=note>listed, not reachable</span>' if s["listed"] else '<span class=note>none found</span>'
             return base + note
@@ -2018,6 +2027,24 @@ def render_choose(rows, generated, changes, E):
             parts.append(f'{E("sv1 port" if path == "sv1" else "own gateway")}: {E(what)}')
         return "<br>".join(parts) if parts else '<span class=note>none yet</span>'
 
+    def cell_claims(x):
+        cs = x.get("claims") or []
+        if not cs:
+            return '<span class=note>no claim to test</span>'
+        parts = []
+        for c in cs:
+            t = iso_t(c.get("checked_at") or "")
+            detail = c["claim"] + ": " + c["found"] + "." + (" Checked " + tsz(t, "%Y-%m-%d %H:%M %Z") + "." if t else "") \
+                + (" Source: " + c["source"] + "." if c.get("source") else "")
+            head = {"closure": "closure", "datum": "DATUM service", "ports": "listed ports"}[c["kind"]]
+            if c["agree"] is None:
+                parts.append(tipped(head + ": not testable", detail, "note"))
+            elif c["agree"]:
+                parts.append(tipped(head + ": agrees", detail, "ok"))
+            else:
+                parts.append(tipped(head + ": differs", detail, "warn") + f'<br><span class=note>{E(c["found"])}</span>')
+        return "<br>".join(parts)
+
     has_canary = any(x["canary"] for x in rows)
     canary_th = th("Canary", "choose_canary") if has_canary else ""
 
@@ -2049,6 +2076,12 @@ def render_choose(rows, generated, changes, E):
     if parts and not any(x["blocks_7d"] for x in datum_only):
         parts.append("No pool finding blocks this week is DATUM-only: every one with a DATUM service also lists a public "
                      "stratum v1 port, so which path you use is your choice, not the pool's.")
+    differs = [(x, [c for c in x.get("claims") or [] if c["agree"] is False]) for x in rows]
+    differs = [(x, cs) for x, cs in differs if cs]
+    if differs:
+        parts.append("<strong>Where a pool's own page and the probe differ:</strong> "
+                     + "; ".join(E(x["pool"]) + ": " + ", ".join(E(c["claim"] + ", " + c["found"]) for c in cs) for x, cs in differs)
+                     + ". Answering a subscribe and taking a worker is all the probe can see; whether shares there are still paid is not measured.")
     summary = " ".join(parts)
     changes_html = render_changes(rows, changes, E)
     site_read = max((x["site"]["read"] or "" for x in rows), default="")
@@ -2071,6 +2104,7 @@ def render_choose(rows, generated, changes, E):
         body += (f'<tr><td>{name}</td><td class=n>{share}</td><td class=n>{bpd}</td>'
                  f'<td>{cell_datum(x)}</td><td>{cell_v1(x)}</td><td>{tipped(x["payout"]["text"], x["payout"]["detail"])}</td>'
                  f'<td>{cell_trust(x["trust"]["sv1_port"])}</td><td>{cell_trust(x["trust"]["own_gateway"])}</td>'
+                 f'<td>{cell_claims(x)}</td>'
                  + (f'<td>{cell_canary(x)}</td>' if has_canary else "") + '</tr>')
     return f"""
 <h2 id="pools">Choosing a pool</h2>
@@ -2089,7 +2123,7 @@ because a larger pool pays more often. Pools with no DATUM service are marked <s
 listed last, and one with neither a DATUM service nor a known stratum port is marked <span class=note>no endpoint found</span>; a pool with a DATUM service and no public stratum port on file is marked <span class=ok>DATUM only</span>.
 The same rows are published as <a href="pools.json">pools.json</a> for other sites to use.</p>
 <div class="wrap"><table class="stack wide dense">
-<tr>{th("Pool", "pool")}{th("Share, 7 days", "choose_share", "n")}{th("Blocks per day", "choose_bpd", "n")}{th("DATUM service", "choose_datum")}{th("Public sv1 port", "choose_sv1")}{th("Reward leaves the block", "choose_paid")}{th("On the sv1 port you hand the pool", "choose_trust_v1")}{th("With your own gateway you hand the pool", "choose_trust_gw")}{canary_th}</tr>
+<tr>{th("Pool", "pool")}{th("Share, 7 days", "choose_share", "n")}{th("Blocks per day", "choose_bpd", "n")}{th("DATUM service", "choose_datum")}{th("Public sv1 port", "choose_sv1")}{th("Reward leaves the block", "choose_paid")}{th("On the sv1 port you hand the pool", "choose_trust_v1")}{th("With your own gateway you hand the pool", "choose_trust_gw")}{th("Site vs probe", "choose_claims")}{canary_th}</tr>
 {body}
 </table></div>
 <p class="note">Pools with a public endpoint or at least one percent of the survey window are listed;
@@ -2672,7 +2706,7 @@ html.js section.tab {{ display: none; }}
 <li><strong>Template built by.</strong> {E(TIPS["builder"])}</li>
 <li><strong>Coinbase payout.</strong> {E(TIPS["payout"])}</li>
 <li><strong>Reversal risk.</strong> {E(TIPS["risk_table"])} {E(TIPS["risk_monitor"])}</li>
-<li><strong>Choosing a pool.</strong> {E(TIPS["choose_trust_v1"])} {E(TIPS["choose_trust_gw"])} {E(TIPS["choose_datum"])} {E(TIPS["choose_sv1"])} {E(TIPS["choose_changes"])} {E(TIPS["choose_canary"])}</li>
+<li><strong>Choosing a pool.</strong> {E(TIPS["choose_trust_v1"])} {E(TIPS["choose_trust_gw"])} {E(TIPS["choose_datum"])} {E(TIPS["choose_sv1"])} {E(TIPS["choose_claims"])} {E(TIPS["choose_changes"])} {E(TIPS["choose_canary"])}</li>
 <li><strong>Moved and held.</strong> {E(TIPS["moved"])} {E(TIPS["held"])}</li>
 <li><strong>Wallets.</strong> {E(TIPS["wallet"])}</li>
 <li><strong>Movement shapes.</strong> {E(TIPS["shape"])}</li>
@@ -2868,7 +2902,7 @@ html.js section.tab {{ display: none; }}
                 "method": {"share_7d_pct": TIPS["choose_share"], "payout": TIPS["choose_paid"],
                            "sv1": TIPS["choose_sv1"], "datum": TIPS["choose_datum"],
                            "trust_sv1_port": TIPS["choose_trust_v1"], "trust_own_gateway": TIPS["choose_trust_gw"],
-                           "changes": TIPS["choose_changes"], "canary": TIPS["choose_canary"],
+                           "changes": TIPS["choose_changes"], "claims": TIPS["choose_claims"], "canary": TIPS["choose_canary"],
                            "terms": "What each pool's own site says, with the URL and the date it was read. Not verified."},
                 "changes": choose_changes,
                 "pools": choose}

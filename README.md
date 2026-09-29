@@ -273,6 +273,18 @@ and the page says so. A pool whose site says its stratum path is closed
 carries `sv1_closed` with the date and page, and the table says so even
 while the port still answers.
 
+The "Site vs probe" column puts each claim a pool's own page makes next to
+what the probe found the same hour: a path the site calls closed (do its
+ports still answer a subscribe and hand out work for this chain?), the
+DATUM service it publishes (does a real handshake verify it?), and the
+stratum ports the page lists (do they answer?). Ports a site calls closed
+are kept in the list with `"closed": true` so they keep being tested, and on
+those ports the probe also authorizes a throwaway worker (a random address
+with no key behind it) and watches whether the pool accepts it and keeps
+sending work. It never submits a share, so an answering port that takes a
+worker proves the service is up and open, not that shares sent there are
+still paid, and the page says so.
+
 "What changed lately" above the table lists dated statements from the pools'
 own pages (`changes` in the endpoint list) and what the chain shows: the
 survey reads each pool's blocks day by day and reports the day its blocks
