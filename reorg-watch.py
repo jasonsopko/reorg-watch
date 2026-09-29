@@ -2057,6 +2057,8 @@ def render_choose(rows, generated, changes, E):
         t = iso_t(site_read)
         site_note = " Each pool's own pages were last read " + (tt(t, "minute") if t else E(site_read)) + \
                     "; a port a page shows that the list lacks is probed the next hour, and a DATUM service is verified with a real handshake."
+    gen_t = iso_t(generated or "")
+    gen_html = tt(gen_t, "minute") if gen_t else E(generated or "unknown")
     body = ""
     for x in rows:
         name = f'<a href="{E(x["link"])}" rel="noopener">{E(x["pool"])}</a>' if x["link"] else E(x["pool"])
@@ -2093,7 +2095,7 @@ The same rows are published as <a href="pools.json">pools.json</a> for other sit
 <p class="note">Pools with a public endpoint or at least one percent of the survey window are listed;
 individual miners, marketplaces and category labels are not. The pool's node builds every block found
 through a stratum v1 port by construction, so that column needs no measurement. The reward column and
-the on-chain share come from this site's own coinbase index.{site_note} Survey generated {E(generated or "unknown")}.</p>
+the on-chain share come from this site's own coinbase index.{site_note} Survey generated {gen_html}.</p>
 """
 
 
