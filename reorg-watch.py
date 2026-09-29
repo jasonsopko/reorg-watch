@@ -1087,6 +1087,7 @@ TIPS = {
     "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
     "choose_datum": "Whether the pool runs a DATUM service that your own DATUM gateway can connect to. Verified means this site completed a real DATUM handshake with the pool's published pubkey, the opening exchange a gateway makes, and closed the session; the time is when. Published, failing means the endpoint and key are on the pool's site but the last handshake failed, with the reason. No pubkey means the service cannot be verified, only the port checked. The fee is what the pool's site says, read on the date in pools.json.",
     "choose_sv1": "Public stratum v1 endpoints that answered a probe with work for this chain. Ports come from the pool's own pages, read every hour, as well as this site's list, so a port a page adds is probed the next hour. Closed means the pool's own site says the path is closed, whatever the port still answers. The fee is what the pool's site says, read on the date in pools.json.",
+    "survey_path": "The same reading as the Choosing a pool table: DATUM only when the pool has a DATUM service and no stratum port on file answered this hour; DATUM, also takes stratum when stratum ports answered too; stratum only when no DATUM service was found. The count is how many stratum ports answered a subscribe.",
     "choose_claims": "What the pool's own pages claim, next to what this site's probe found, checked every hour: a path the site calls closed (do its ports still answer a subscribe and hand out work for this chain?), the DATUM service the site publishes (does a real handshake verify it?), and the stratum ports the page lists (do they answer?). Agrees and differs are the probe's reading of the pool's own words. On a port the site calls closed the probe also authorizes a throwaway worker and watches whether the pool accepts it and keeps sending work. That is as far as it goes: it never submits a share, so whether shares sent there are credited or paid is not measured.",
     "choose_changes": "What pools changed lately: dated statements from their own pages, and what the chain shows. The chain part is measured from this site's coinbase index, day by day: when a pool's blocks switched between being built by its own stratum server and through DATUM gateways with the pool upstream, and when the number of coinbase outputs changed size class. A switch is reported once it has held for a full day. Gateway names are the distinct second coinbase tags seen in the pool's blocks that day.",
     "choose_paid": "Measured from this pool's last 20 coinbases, not taken from its site: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Held by the pool, paid later: one or two outputs with most of the value to one address. Paid in the coinbase: the miners, or the finder, are paid in the block itself.",
@@ -1479,8 +1480,16 @@ def render_forks(sd, E, colormap, st):
             f'<tr><th>Pool whose block was discarded</th><th class=n>Times</th></tr>{rows}</table></div>\n')
 
 
-def render_survey(sd, E):
-    """The endpoint survey section. Absent file renders nothing at all."""
+def render_survey(sd, E, tiers=None):
+    """The endpoint survey section. Absent file renders nothing at all. tiers maps a pool
+    label to its Choosing-a-pool row, so both tables call the pool's path the same thing."""
+    tiers = tiers or {}
+
+    def iso_t(v):
+        try:
+            return datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            return None
     try:
         sv = json.load(open(os.path.join(sd, "pool-survey.json")))
     except Exception:
@@ -1512,11 +1521,27 @@ def render_survey(sd, E):
         else:
             eps = '<span class=note>no endpoint recorded yet</span>'
         sw = ", ".join(E(x) for x in r.get("software", [])) or "-"
-        cls = {"D": "DATUM pool", "G": "Gateway, stratum v1", "O": "Other"}.get(oc.get("class_majority"), "-")
+        cls = {"D": "DATUM gateway, pool upstream", "G": "stand-alone gateway or pool stratum", "O": "other software"}.get(oc.get("class_majority"), "-")
         cons = r.get("consistency", "-")
         klass = " class=note" if cons == "not testable" else ""
-        rows += (f'<tr><td>{E(r["label"])}</td><td class=n>{share if share is not None else "-"}</td>'
-                 f'<td>{eps}</td><td>{sw}</td><td>{E(r.get("datum","-"))}</td><td>{cls}</td>'
+        x = tiers.get(r["label"])
+        if x:
+            tag_cls = {0: "ok", 1: "warn", 2: "bad", 3: "note"}[x["tier"]]
+            n_sv1 = len(x.get("sv1_answering") or [])
+            path = f'<span class="{tag_cls}">{E(x["tier_label"])}</span>' + (
+                f'<br><span class=note>{n_sv1} stratum port{"s" if n_sv1 != 1 else ""} answering</span>' if n_sv1 else "")
+        elif kind != "pool":
+            path = '<span class=note>-</span>'
+        else:
+            path = '<span class=note>not in the table above</span>'
+        dstat = r.get("datum") or ""
+        dshort = next((short for k, short in DATUM_SHORT if dstat.startswith(k)), dstat or "-")
+        dcell = tipped(dshort, dstat, DATUM_CLASS.get(dshort, "")) if dstat else "-"
+        t_chk = iso_t(((r.get("datum_check") or {}).get("checked_at")) or "")
+        if t_chk and (r.get("datum_check") or {}).get("result") in ("verified", "failed"):
+            dcell += f'<br><span class=note>{tt(t_chk, "short")}</span>'
+        rows += (f'<tr><td>{E(r["label"])}</td><td class=n>{share if share is not None else "-"}</td><td>{path}</td>'
+                 f'<td>{eps}</td><td>{sw}</td><td>{dcell}</td><td>{cls}</td>'
                  f'<td>{tipped(*payout_class(oc.get("median_outputs"), oc.get("dominant_script_pct"), kind, own_from_survey(oc))[1:])}</td>'
                  f'<td{klass} title="{E(r.get("consistency_why",""))}">{E(cons)}</td></tr>')
     if not rows:
@@ -1538,10 +1563,13 @@ matching its reply against each project's source code. Endpoints last probed {ge
 protocols at once, so this records what an endpoint speaks, not how any particular block was built.
 {omitted} smaller pools with no endpoint on file are not listed.{shared_note}</p>
 <div class="wrap"><table class="stack wide dense">
-<tr><th>Pool</th><th class=n>Share</th><th>Endpoints probed</th><th>Server software</th><th>DATUM</th><th>Template built by</th><th>Coinbase payout</th><th>Consistency</th></tr>
+<tr><th>Pool</th><th class=n>Share</th>{th("Path offered", "survey_path")}<th>Endpoints probed</th><th>Server software</th><th>DATUM</th>{th("Template built by", "builder")}<th>Coinbase payout</th><th>Consistency</th></tr>
 {rows}
 </table></div>
-<p class="note"><strong>Server software</strong> is named by matching the subscribe reply to the
+<p class="note"><strong>Path offered</strong> is the same reading as the Choosing a pool table above: DATUM only
+when no stratum port on file answered this hour, otherwise which of the two paths the pool takes; a pool whose
+blocks are all built through DATUM gateways can still take stratum hashrate, because its own public gateways
+build blocks the same way a miner's does. <strong>Server software</strong> is named by matching the subscribe reply to the
 source of datum_gateway, miningcore, node-stratum-pool, ckpool and public-pool; each of those
 writes a distinguishable reply. <strong>DATUM</strong> records what was found, and absence from a
 web page is not evidence that a service does not exist. <strong>Consistency</strong> compares a
@@ -2455,7 +2483,6 @@ def render_html(path, sd, st):
                    "Moved means a coinbase output was spent: a payout to miners, a consolidation, or a transfer out. "
                    "The chain shows movement, not a sale. Held is mined minus moved and includes immature rewards.")
     forks_html = render_forks(sd, E, colormap, st)
-    survey_html = render_survey(sd, E)
     if os.path.exists(rw_path):
         week, week_total = week_counts(rw, now)
         canaries = canary_results(sd, rw)
@@ -2463,6 +2490,7 @@ def render_html(path, sd, st):
         week, week_total, canaries = None, 0, {}
     choose, choose_gen, choose_changes = choose_rows(sd, week, week_total, canaries)
     choose_html = render_choose(choose, choose_gen, choose_changes, E)
+    survey_html = render_survey(sd, E, {x["pool"]: x for x in choose})
     risk_html, risk_feed = render_risk(sd, st, rw if os.path.exists(rw_path) else None, E, now)
     knot = ('<svg class="mark" viewBox="0 0 773 773" width="60" height="60" role="img" aria-label="Bitcoin Knots">'
             '<circle cx="386.5" cy="386.5" r="380" fill="#f7931a"/>'
