@@ -234,8 +234,28 @@ are written next to the page as `risk.json`.
 ### Choosing a pool
 
 A table for someone deciding where to point a miner, built from
-`pool-survey.json` and the coinbase index. Every pool can be reached two
-ways, and the table says what each path hands the pool:
+`pool-survey.json` and the coinbase index. The survey is made by three
+scripts that live next to the watcher, not in this repository:
+
+- `pool-site-watch.py` reads each pool's own pages every hour and writes
+  `site-endpoints.json`, every host:port and DATUM pubkey the pages show,
+  with first and last seen times. It also mails when what the pages show
+  differs from the hand-kept list.
+- `pool-survey.py` probes every listed endpoint and every endpoint the pages
+  show that the list lacks: one Stratum v1 `mining.subscribe` for a stratum
+  port, whose job is matched to this chain, and one real DATUM handshake
+  against the pool's published pubkey for a DATUM port. A pool's DATUM
+  service reads "verified" only when that handshake completed within the
+  hour; "published, failing" when it did not, with the reason.
+- `datum-check.py` is the handshake itself: the signed, sealed hello a
+  gateway sends (with the version 3 extension), the pool's reply opened with
+  the session key and checked against the pool's signing key, then the
+  session is closed. It runs libsodium through ctypes and keeps one
+  long-lived identity so a pool sees a single client, not a new gateway
+  every hour.
+
+Every pool can be reached two ways, and the table says what each path hands
+the pool:
 
 - **Public stratum v1 port.** The pool's node builds the block, always, so
   the hasher gives up the choice of transactions. Whether the pool also
@@ -249,7 +269,16 @@ ways, and the table says what each path hands the pool:
 Fees are what each pool's own site says. The survey passes them through from
 a `terms` object on each pool: `sv1_fee`, `datum_fee`, `payout`, with
 `source` and `checked` (the date the page was read). They are self-reported
-and the page says so.
+and the page says so. A pool whose site says its stratum path is closed
+carries `sv1_closed` with the date and page, and the table says so even
+while the port still answers.
+
+"What changed lately" above the table lists dated statements from the pools'
+own pages (`changes` in the endpoint list) and what the chain shows: the
+survey reads each pool's blocks day by day and reports the day its blocks
+switched between being built by its own stratum server and through DATUM
+gateways with the pool upstream, and the day its coinbase output count
+changed size class, once the switch has held for a day.
 
 A pool's actual payout behavior can be measured by pointing a small miner
 of your own at it. List those in `canaries.json` in the state directory:
