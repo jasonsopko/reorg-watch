@@ -1870,11 +1870,28 @@ def choose_rows(sd, week, week_total, canaries):
         dshort = next((short for k, short in DATUM_SHORT if dstat.startswith(k)), "not found")
         datum_ok = dshort in DATUM_AVAILABLE
         dcheck = r.get("datum_check") or {}
-        check = {k: dcheck.get(k) for k in ("result", "endpoint", "checked_at", "last_verified", "motd", "detail", "failed_runs", "why")
+        check = {k: dcheck.get(k) for k in ("result", "endpoint", "checked_at", "last_verified", "motd", "detail", "failed_runs", "why", "port_open")
                  if dcheck.get(k) is not None} if dcheck else None
         d_eps = [{"endpoint": e["endpoint"], **{k: e["datum_check"].get(k) for k in ("result", "checked_at", "last_verified", "reply_ms")}}
                  for e in probed if e.get("datum_check")]
         site = r.get("site") or {}
+        # The path a pool offers, measured this hour: any stratum port on file (the pool's
+        # page or docs, closed or not) that answered a subscribe is a public stratum path,
+        # and one that handed out a job for this chain is a working one.
+        sv1_answering = [e["endpoint"] for e in v1_all]
+        sv1_work = [e["endpoint"] for e in v1_all if e.get("chain") == "this"]
+        # Tier credit for a DATUM service needs a published key and endpoint, or, with no
+        # key to verify, a DATUM port that at least accepts a connection.
+        datum_credit = dshort in ("yes, verified", "verified earlier, failing now", "published, handshake failing", "yes") \
+            or (dshort == "endpoint published, no pubkey" and bool((check or {}).get("port_open")))
+        if datum_credit and not sv1_answering:
+            tier, tier_label = 0, "DATUM only"
+        elif datum_credit:
+            tier, tier_label = 1, "DATUM, also takes stratum"
+        elif sv1_answering or v1_listed:
+            tier, tier_label = 2, "stratum only"
+        else:
+            tier, tier_label = 3, "no endpoint found"
         if v1:
             trust_v1 = "the block and your reward" if custody else ("the block" if custody is False else "the block, reward not measured")
         else:
@@ -1899,6 +1916,8 @@ def choose_rows(sd, week, week_total, canaries):
             "datum": {"status": dshort, "detail": dstat, "fee": terms.get("datum_fee", ""), "check": check, "endpoints": d_eps},
             "trust": {"sv1_port": trust_v1, "own_gateway": trust_gw},
             "datum_offered": datum_ok,
+            "tier": tier, "tier_label": tier_label,
+            "sv1_answering": sv1_answering, "sv1_work": sv1_work,
             "site": {"read": site.get("read"), "pages": len(site.get("pages") or []), "discovered": site.get("discovered") or []},
             "changes": {"onchain": r.get("onchain_changes") or [], "gateway_names": r.get("gateway_names_today")},
             "claims": r.get("claims") or [],
@@ -1907,9 +1926,13 @@ def choose_rows(sd, week, week_total, canaries):
             "consistency": r.get("consistency", "-"),
             "last_probed": max((e["probed_at"] for e in probed), default=None),
         })
-    # Pools that offer DATUM first, largest first within each group: the recommendation
-    # is to run your own gateway, and a bigger DATUM pool pays more often.
-    rows.sort(key=lambda x: (not x["datum_offered"], -(x["blocks_7d"] or 0), -(x["share_window_pct"] or 0)))
+    # Order: DATUM-only pools first, largest first (a bigger pool pays more often); then
+    # pools with a DATUM service whose stratum ports also hand out work, SMALLEST first,
+    # because the more of the network's blocks one of them already finds, the more its
+    # stratum ports concentrate template building; stratum-only pools after that.
+    rows.sort(key=lambda x: (x["tier"], not x["blocks_7d"],
+                             (x["blocks_7d"] or 0) if x["tier"] == 1 else -(x["blocks_7d"] or 0),
+                             (x["share_window_pct"] or 0) if x["tier"] == 1 else -(x["share_window_pct"] or 0)))
     for i, x in enumerate(rows, 1):
         x["rank"] = i
     return rows, sv.get("generated"), sv.get("changes") or []
@@ -2055,27 +2078,25 @@ def render_choose(rows, generated, changes, E):
             return E(x["pool"])
         return f'{E(x["pool"])} ({pct:.1f}%)' if pct < 1 else f'{E(x["pool"])} ({pct:.0f}%)'
     active = [x for x in rows if x["blocks_7d"]]
-    datum_only = [x for x in rows if x["datum_offered"] and not x["sv1"]["endpoints"] and not x["sv1"]["listed"]]
+    tiers = {t: [x for x in rows if x["tier"] == t and (x["blocks_7d"] or t == 0)] for t in range(4)}
     parts = []
-    if any(x["datum_offered"] for x in active):
-        parts.append("<strong>Pools with a DATUM service</strong>, by share of the last 7 days: "
-                     + ", ".join(name_pct(x) for x in active if x["datum_offered"]) + ".")
-    def sv1_only(x):
-        return not x["datum_offered"] and (x["sv1"]["endpoints"] or x["sv1"]["listed"])
-
-    def no_endpoint(x):
-        return not x["datum_offered"] and not (x["sv1"]["endpoints"] or x["sv1"]["listed"])
-    if any(sv1_only(x) for x in active):
-        parts.append("<strong>Stratum v1 only, no DATUM service found:</strong> "
-                     + ", ".join(name_pct(x) for x in active if sv1_only(x)) + ".")
-    if any(no_endpoint(x) for x in active):
-        parts.append("<strong>No public endpoint found, on the site or the chain:</strong> "
-                     + ", ".join(name_pct(x) for x in active if no_endpoint(x)) + ".")
-    if datum_only:
-        parts.append("<strong>DATUM only, no public stratum port on file:</strong> " + ", ".join(name_pct(x) for x in datum_only) + ".")
-    if parts and not any(x["blocks_7d"] for x in datum_only):
-        parts.append("No pool finding blocks this week is DATUM-only: every one with a DATUM service also lists a public "
-                     "stratum v1 port, so which path you use is your choice, not the pool's.")
+    if tiers[0]:
+        parts.append("<strong>DATUM only, no stratum port on file answering:</strong> "
+                     + ", ".join(name_pct(x) for x in tiers[0]) + ".")
+    else:
+        parts.append("<strong>No pool is DATUM-only this hour:</strong> every one with a DATUM service also has a stratum port handing out work.")
+    if tiers[1]:
+        parts.append("<strong>DATUM service, but stratum ports on file also hand out work:</strong> "
+                     + ", ".join(name_pct(x) for x in tiers[1]) + ".")
+    if tiers[2]:
+        parts.append("<strong>Stratum only, no DATUM service found:</strong> " + ", ".join(name_pct(x) for x in tiers[2]) + ".")
+    if tiers[3]:
+        parts.append("<strong>No public endpoint found, on the site or the chain:</strong> " + ", ".join(name_pct(x) for x in tiers[3]) + ".")
+    blind = sum((x["share_7d_pct"] or 0) for x in tiers[1] + tiers[2])
+    if blind:
+        parts.append(f"Pools with a stratum port answering found {blind:.0f}% of the last 7 days' blocks between them; how much of "
+                     "that came through their stratum ports is not visible from the chain, since a pool's own gateway builds a block "
+                     "the same way a miner's does.")
     differs = [(x, [c for c in x.get("claims") or [] if c["agree"] is False]) for x in rows]
     differs = [(x, cs) for x, cs in differs if cs]
     if differs:
@@ -2095,10 +2116,13 @@ def render_choose(rows, generated, changes, E):
     body = ""
     for x in rows:
         name = f'<a href="{E(x["link"])}" rel="noopener">{E(x["pool"])}</a>' if x["link"] else E(x["pool"])
-        if not x["datum_offered"]:
-            name += '<br><span class=warn>sv1 only</span>' if (x["sv1"]["endpoints"] or x["sv1"]["listed"]) else '<br><span class=note>no endpoint found</span>'
-        elif not x["sv1"]["endpoints"] and not x["sv1"]["listed"]:
-            name += '<br><span class=ok>DATUM only</span>'
+        tag_cls = {0: "ok", 1: "warn", 2: "bad", 3: "note"}[x["tier"]]
+        tag_tip = {0: "No stratum port on file answered this hour; the only way in is your own gateway.",
+                   1: "Has a DATUM service, and stratum ports on file also answered: " + ", ".join(x["sv1_answering"][:4])
+                      + (" and more" if len(x["sv1_answering"]) > 4 else "") + ". Every block found through those is built by the pool's node.",
+                   2: "No DATUM service found; every block is built by the pool's node.",
+                   3: "Nothing on the pool's site or docs to probe."}[x["tier"]]
+        name += "<br>" + tipped(x["tier_label"], tag_tip, tag_cls)
         share = f'{x["share_7d_pct"]:.1f}%' if x["share_7d_pct"] is not None else "-"
         bpd = f'{x["blocks_per_day"]:.1f}' if x["blocks_per_day"] is not None else "-"
         body += (f'<tr><td>{name}</td><td class=n>{share}</td><td class=n>{bpd}</td>'
@@ -2117,11 +2141,15 @@ own site says. At the same hashrate you earn the same before fees on any pool; w
 arrives, which follows blocks per day, and who holds the money in between.</p>
 <p class="note">{summary}</p>
 {changes_html}
-<p class="note"><strong>Run your own gateway and point it at a pool with a DATUM service.</strong> The block stays yours,
-and where the pool pays in the coinbase, so does the reward. Pools with a DATUM service are listed first, largest first
-because a larger pool pays more often. Pools with no DATUM service are marked <span class=warn>sv1 only</span> and
-listed last, and one with neither a DATUM service nor a known stratum port is marked <span class=note>no endpoint found</span>; a pool with a DATUM service and no public stratum port on file is marked <span class=ok>DATUM only</span>.
-The same rows are published as <a href="pools.json">pools.json</a> for other sites to use.</p>
+<p class="note"><strong>Run your own gateway and point it at a pool that takes only DATUM.</strong> The block stays yours,
+and where the pool pays in the coinbase, so does the reward. Every block found through a public stratum port is built by
+the pool's node, so the pools that take the most stratum hashrate are the few nodes deciding what goes into most blocks;
+pointing a miner at one of their stratum ports adds to that. The order here follows what the probe found this hour, not
+the pool's size: <span class=ok>DATUM only</span> pools first, largest first because a larger pool pays more often; then
+pools marked <span class=warn>DATUM, also takes stratum</span>, smallest first, because the more of the network a pool
+already finds, the more its stratum ports concentrate template building; <span class=bad>stratum only</span> pools last.
+A pool moves up the day its stratum ports stop answering. The same rows, with the tier, are published as
+<a href="pools.json">pools.json</a> for other sites to use.</p>
 <div class="wrap"><table class="stack wide dense">
 <tr>{th("Pool", "pool")}{th("Share, 7 days", "choose_share", "n")}{th("Blocks per day", "choose_bpd", "n")}{th("DATUM service", "choose_datum")}{th("Public sv1 port", "choose_sv1")}{th("Reward leaves the block", "choose_paid")}{th("On the sv1 port you hand the pool", "choose_trust_v1")}{th("With your own gateway you hand the pool", "choose_trust_gw")}{th("Site vs probe", "choose_claims")}{canary_th}</tr>
 {body}
@@ -2903,6 +2931,7 @@ html.js section.tab {{ display: none; }}
                            "sv1": TIPS["choose_sv1"], "datum": TIPS["choose_datum"],
                            "trust_sv1_port": TIPS["choose_trust_v1"], "trust_own_gateway": TIPS["choose_trust_gw"],
                            "changes": TIPS["choose_changes"], "claims": TIPS["choose_claims"], "canary": TIPS["choose_canary"],
+                           "tier": "0 = DATUM only (a DATUM service, and no stratum port on file answered this hour); 1 = a DATUM service plus stratum ports that answer; 2 = stratum only; 3 = no endpoint found. Rows are ordered by tier, tier 1 smallest first.",
                            "terms": "What each pool's own site says, with the URL and the date it was read. Not verified."},
                 "changes": choose_changes,
                 "pools": choose}

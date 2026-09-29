@@ -254,6 +254,15 @@ scripts that live next to the watcher, not in this repository:
   long-lived identity so a pool sees a single client, not a new gateway
   every hour.
 
+Rows are ordered by the path the probe found that hour, not by size. Pools
+with a DATUM service and no stratum port on file answering come first
+(largest first, since a larger pool pays more often). Pools with a DATUM
+service whose stratum ports also hand out work come next, smallest first:
+every block found through a stratum port is built by the pool's node, so
+the more of the network such a pool already finds, the more its stratum
+ports concentrate template building. Stratum-only pools come last. The
+tier is published in `pools.json` as `tier` (0 to 3) and `tier_label`.
+
 Every pool can be reached two ways, and the table says what each path hands
 the pool:
 
