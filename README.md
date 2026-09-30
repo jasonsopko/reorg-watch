@@ -30,6 +30,7 @@ Once a minute, from the node's REST interface:
 | pool share high | ALERT | One pool found 45 percent or more of the last 6 hours, with at least 40 blocks in them. Repeats at most every 6 hours per pool. |
 | block rate step | ALERT | Blocks in the last 6 hours under 65 or over 150 percent of the prior day's pace. Skipped when a difficulty retarget falls inside either window. |
 | orphan wins | ALERT | One pool won 3 or more depth-1 reorgs against other pools in 24 hours, which is what selfish mining looks like from outside. |
+| unattributed share | ALERT | Blocks under solo, unknown or category labels at 30 percent or more of the last 24 hours, with at least 60 blocks. A pool that gives each miner its own gateway and payout address shows up here and nowhere else. Repeats at most once a day. |
 
 Pool attribution matches the coinbase tag and payout addresses against
 Kilombino's `pools-v2.json`, the list mempool.guide and mempool.kilombino.com
@@ -227,7 +228,7 @@ odds under one percent and under a tenth of a percent at the 3-day share.
 Reference rows at 40, 45 and 49 percent sit under the live row. The section
 says on the page why it is there and what it assumes: the whole pool acting
 as one attacker, and no other hashrate joining. At or above half it prints
-that no count is safe. The state of the three concentration checks and the
+that no count is safe. The state of the four concentration checks and the
 time of the last such alert are shown under the table, and the same numbers
 are written next to the page as `risk.json`.
 

@@ -82,6 +82,12 @@ SHARE_ALERT = 0.45        # one pool's share of the last 6 hours
 SHARE_MIN_BLOCKS = 40     # and at least this many blocks in those 6 hours
 RATE_LOW, RATE_HIGH = 0.65, 1.5   # blocks in 6 h against the prior day's pace
 ORPHAN_WINS = 3           # depth-1 reorgs one pool won against others in 24 h
+# A pool can hide its size by giving each miner its own gateway and payout address: every
+# block then looks like a different solo miner and no pool's share moves. The blocks that no
+# pool name claims are the only place that shows. Since the fork that share has run near 11%
+# of blocks with a 24 h peak of 27.5% (2026-09-13), so 30% is above anything seen so far.
+UNATTRIBUTED_ALERT = 0.30      # solo, unknown and category labels' share of the last 24 h
+UNATTRIBUTED_MIN_BLOCKS = 60   # and at least this many blocks in those 24 h
 BRANCH_ALERT_LEN = 3      # a competing branch at least this long...
 BRANCH_ALERT_GAP = 2      # ...whose tip is within this many blocks of ours, or above it
 AHEAD_NOTE = 2            # crawled peers this many blocks past our tip get a note on the page
@@ -602,6 +608,13 @@ def survey_kinds(sd):
     return {r["label"]: r.get("kind", "pool") for r in sv.get("pools", []) if r.get("label")}
 
 
+def unattributed(label, kinds):
+    """A label that names nobody: an address prefix (Solo bc1q...), the fallback for an
+    address the pools list does not know (Unknown (...)), or a survey category that covers
+    many independent miners (DATUM miners)."""
+    return label.startswith("Solo ") or label.startswith("Unknown (") or kinds.get(label) == "category"
+
+
 def canary_scripts(sd):
     """Hex scriptPubKeys of our canary miners, from canaries.json in the state directory."""
     try:
@@ -1019,6 +1032,10 @@ def line_for(e):
         return f"ALERT {e['pool']} won {e['wins']} depth-1 reorgs against other pools in {e['hours']} h"
     if t == "wallet_share":
         return f"ALERT one wallet mined {e['share']}% of the last 24 h ({e['blocks']}/{e['of']} blocks) under labels {', '.join(e['labels'])}"
+    if t == "unattributed_share":
+        base = f"; prior week {e['baseline_share']}%" if e.get("baseline_share") is not None else ""
+        return (f"ALERT blocks no pool name claims: {e['share']}% of the last {e['hours']} h ({e['blocks']}/{e['of']} blocks "
+                f"under {e['labels']} solo, unknown or category labels{base}). A pool paying each miner at its own address looks like this")
     if t == "invalid_block":
         who = ", ".join(f"{p} {n}" for p, n in e["pools"].items()) or "unknown"
         return (f"ALERT block {e['height']} {e['hash'][:16]} is invalid under this node's rules; mined by {who}. "
@@ -1048,7 +1065,7 @@ TIPS = {
     "node": "The node answered its REST interface this run. Three misses in a row is an alert.",
     "explorer": "The explorer's block hash at our tip height is compared with ours once a minute. A different hash for 2 consecutive checks, or the explorer 3 or more blocks ahead for 3 checks, is an alert.",
     "reorgs": "A reorg is counted when the active chain's hash at an already-seen height changes. Depth is the number of blocks replaced. Depth 1 is an ordinary tie between two blocks found seconds apart; depth 2 or more is an alert.",
-    "last_alert": "Most recent event that was emailed: a reorg of depth 2 or more, an explorer disagreement, a node that fell behind, a node outage, two substantial pool names found sharing one wallet, or one of the concentration checks: a pool above 45 percent of 6 hours, a step in block pace, or one pool winning repeated ties.",
+    "last_alert": "Most recent event that was emailed: a reorg of depth 2 or more, an explorer disagreement, a node that fell behind, a node outage, two substantial pool names found sharing one wallet, or one of the concentration checks: a pool above 45 percent of 6 hours, a step in block pace, one pool winning repeated ties, or blocks no pool name claims above 30 percent of 24 hours.",
     "tip": "Height and hash of the node's best block at the time this page was generated.",
     "pool": "A pool named in the coinbase tag and paid in the coinbase wins; otherwise the first payout address in Kilombino's pool list, then the tag. Both are chosen by the miner, so a name is a claim, not proof.",
     "blocks24": "Blocks whose header time falls in the last 24 hours. Shares are block counts and carry a few points of statistical noise.",
@@ -1096,7 +1113,7 @@ TIPS = {
     "risk_share": "The pool that found the most blocks in the window, and its share. Names come from the coinbase, so this is the share of a label; the wallet table below merges labels that share a wallet.",
     "risk_confs": "Smallest number of confirmations at which the largest pool's 3-day share gives reversal odds under the stated level, by the whitepaper formula. None means the pool holds half or more and no count is safe.",
     "risk_table": "Probability that a pool with the given share reverses a payment after that many confirmations, if the whole pool mines a private chain from the moment of the payment. The whitepaper formula with Poisson attacker progress; it assumes no other hashrate joins.",
-    "risk_monitor": "Three checks run every minute. Share: one pool above 45 percent of the last 6 hours, with at least 40 blocks. Pace: blocks in the last 6 hours under 65 or over 150 percent of the prior day's pace, skipped across a difficulty retarget. Ties: one pool winning 3 or more depth-1 reorgs against other pools in 24 hours, which is what selfish mining looks like from outside. Each alert repeats at most once per window.",
+    "risk_monitor": "Four checks run every minute. Share: one pool above 45 percent of the last 6 hours, with at least 40 blocks. Pace: blocks in the last 6 hours under 65 or over 150 percent of the prior day's pace, skipped across a difficulty retarget. Ties: one pool winning 3 or more depth-1 reorgs against other pools in 24 hours, which is what selfish mining looks like from outside. Unclaimed: blocks under solo, unknown or category labels at 30 percent or more of the last 24 hours, with at least 60 blocks, which is what a pool paying each miner at its own address looks like; the prior week is shown for scale. Each alert repeats at most once per window.",
     "choose_canary": "A canary is a small miner of ours pointed at the pool with a fresh address, on the path named. Paid in the coinbase means our address appeared in one of the pool's coinbases. Paid later means a transaction spending the pool's coinbase paid it. Waiting means no payment has been seen yet.",
     "level": "INFO is logged. ALERT is logged and emailed.",
     "event": "Reorgs name the pools on both sides. Explorer and node events say which check failed and for how many consecutive runs.",
@@ -1637,9 +1654,19 @@ def read_reorgs(sd, since, extra=()):
     return out
 
 
-def risk_metrics(sd, st, now, events=()):
-    """The numbers behind the concentration alerts and the risk section."""
+def risk_metrics(sd, st, now, events=(), rw=None):
+    """The numbers behind the concentration alerts and the risk section. rw is the reward
+    index when the caller has one; it supplies the prior week's unattributed share."""
     blocks = [(b["pool"], b["time"], int(h)) for h, b in st.get("blocks", {}).items() if b.get("time")]
+    kinds = survey_kinds(sd)
+    day = [p for p, t, _ in blocks if now - t <= 86400]
+    un = [p for p in day if unattributed(p, kinds)]
+    base_n = base_t = 0
+    if rw is not None:
+        for c in rw.d.get("coinbases", {}).values():
+            if 86400 < now - c.get("t", 0) <= 8 * 86400:
+                base_t += 1
+                base_n += unattributed(c.get("label", ""), kinds)
     label6, n6, t6 = largest_pool(((p, t) for p, t, _ in blocks), now, 6 * 3600)
     recent = [h for _, t, h in blocks if now - t <= 6 * 3600]
     base = [h for _, t, h in blocks if 6 * 3600 < now - t <= 30 * 3600]
@@ -1654,12 +1681,15 @@ def risk_metrics(sd, st, now, events=()):
     return {"share6": {"pool": label6, "blocks": n6, "of": t6, "share": (n6 / t6) if t6 else None},
             "pace": {"blocks_6h": len(recent), "expected_6h": round(len(base) / 4, 1) if base else None,
                      "ratio": (len(recent) / (len(base) / 4)) if base else None, "checked": pace_ok},
-            "wins24": wins}
+            "wins24": wins,
+            "unattributed": {"blocks": len(un), "of": len(day), "share": (len(un) / len(day)) if day else None,
+                             "labels": len(set(un)), "baseline_share": (base_n / base_t) if base_t else None,
+                             "baseline_days": 7 if base_t else None}}
 
 
-def concentration_checks(sd, st, events, now):
-    """Three early warnings, each repeated at most once per window per pool."""
-    m = risk_metrics(sd, st, now, events)
+def concentration_checks(sd, st, events, now, rw=None):
+    """Four early warnings, each repeated at most once per window per pool."""
+    m = risk_metrics(sd, st, now, events, rw)
     risk = st.setdefault("risk", {})
     s6 = m["share6"]
     if s6["of"] >= SHARE_MIN_BLOCKS and s6["share"] >= SHARE_ALERT:
@@ -1677,6 +1707,13 @@ def concentration_checks(sd, st, events, now):
         if c >= ORPHAN_WINS and now - risk.setdefault("orphan_alerted", {}).get(w, 0) >= 86400:
             risk["orphan_alerted"][w] = now
             events.append({"type": "orphan_wins", "level": "ALERT", "pool": w, "wins": c, "hours": 24})
+    u = m["unattributed"]
+    if u["of"] >= UNATTRIBUTED_MIN_BLOCKS and u["share"] >= UNATTRIBUTED_ALERT:
+        if now - risk.get("unattributed_alerted", 0) >= 86400:
+            risk["unattributed_alerted"] = now
+            events.append({"type": "unattributed_share", "level": "ALERT", "blocks": u["blocks"], "of": u["of"],
+                           "share": round(100 * u["share"], 1), "labels": u["labels"], "hours": 24,
+                           "baseline_share": round(100 * u["baseline_share"], 1) if u["baseline_share"] is not None else None})
     return m
 
 
@@ -1751,11 +1788,12 @@ def render_risk(sd, st, rw, E, now):
     rows = [(f"{E(who)} now, {100 * q:.1f}%", q)] + [(f"a pool at {int(100 * x)}%", x) for x in (0.40, 0.45, 0.49)]
     table = "".join(f"<tr><td>{name}</td>" + "".join(f"<td class=n>{100 * reversal_odds(x, z):.1f}%</td>" for z in zs) + "</tr>"
                     for name, x in rows)
-    m = risk_metrics(sd, st, now)
-    s6, pc = m["share6"], m["pace"]
+    m = risk_metrics(sd, st, now, (), rw)
+    s6, pc, u = m["share6"], m["pace"], m["unattributed"]
     wins = ", ".join(f"{E(k)} {v}" for k, v in sorted(m["wins24"].items(), key=lambda kv: -kv[1])) or "none"
     risk = st.get("risk", {})
-    last = max(list(risk.get("share_alerted", {}).values()) + list(risk.get("orphan_alerted", {}).values()) + [risk.get("rate_alerted", 0)])
+    last = max(list(risk.get("share_alerted", {}).values()) + list(risk.get("orphan_alerted", {}).values())
+               + [risk.get("rate_alerted", 0), risk.get("unattributed_alerted", 0)])
     conf_line = ("<strong>No confirmation count is safe while one pool holds half the hashrate.</strong>" if over
                  else f"Confirmations for reversal odds under one percent at that share: <strong>{z1}</strong>; under a tenth of a percent: <strong>{z01}</strong>.")
     feed = {"largest_pool": {"pool_24h": l24, "share_24h": round(100 * q24, 1) if q24 is not None else None,
@@ -1769,6 +1807,10 @@ def render_risk(sd, st, rw, E, now):
                                     "ratio": round(pc["ratio"], 2) if pc["ratio"] is not None else None,
                                     "checked": pc["checked"], "alert_under": RATE_LOW, "alert_over": RATE_HIGH},
                            "depth1_wins_24h": m["wins24"], "alert_at_wins": ORPHAN_WINS,
+                           "unattributed_24h": {"blocks": u["blocks"], "of": u["of"], "labels": u["labels"],
+                                                "share": round(100 * u["share"], 1) if u["share"] is not None else None,
+                                                "prior_week_share": round(100 * u["baseline_share"], 1) if u["baseline_share"] is not None else None,
+                                                "alert_at": 100 * UNATTRIBUTED_ALERT, "min_blocks": UNATTRIBUTED_MIN_BLOCKS},
                            "last_alert": int(last) if last else None}}
     html_out = f"""
 <h2 id="risk">Reversal risk</h2>
@@ -1779,7 +1821,9 @@ set by its share and by how many blocks the public chain has added since. The ta
 recent blocks into that probability after a given number of confirmations, using the formula from the Bitcoin
 whitepaper. It assumes the whole pool acts as one attacker, which is the operator's decision and not the hashers',
 and that no other hashrate joins in. Anyone accepting this chain's coins can read a confirmation count off it. It
-updates with every block, and the checks under it are meant to fire before a share reaches half.</p>
+updates with every block, and the checks under it are meant to fire before a share reaches half. One of them watches
+the blocks no pool name claims, because a pool can hide its size by paying each of its miners at a separate solo
+address; its own share then never moves, and only that unclaimed share does.</p>
 <div class="cards">
 <div class="card"><div class="k">{tipped("Largest pool, 24 h", TIPS["risk_share"])}</div><div class="v">{E(l24 or "-")}<br>{f"{100 * q24:.1f}% ({n24} of {t24})" if q24 is not None else "-"}</div></div>
 <div class="card"><div class="k">{tipped("Largest pool, 3 d", TIPS["risk_share"])}</div><div class="v">{E(l3 or "-")}<br>{f"{100 * q3:.1f}% ({n3} of {t3})" if q3 is not None else "not indexed"}</div></div>
@@ -1794,6 +1838,7 @@ updates with every block, and the checks under it are meant to fire before a sha
 Share of the last 6 hours: {E(s6["pool"] or "-")} {f"{100 * s6['share']:.0f}% ({s6['blocks']} of {s6['of']})" if s6["share"] is not None else "-"}, alert at {int(100 * SHARE_ALERT)}%.
 Pace: {pc["blocks_6h"]} blocks in 6 hours against {pc["expected_6h"] if pc["expected_6h"] is not None else "-"} expected from the prior day{"" if pc["checked"] else " (not checked: window too short or a retarget inside it)"}, alert under {int(100 * RATE_LOW)}% or over {int(100 * RATE_HIGH)}%.
 Depth-1 reorgs won against other pools in 24 hours: {wins}, alert at {ORPHAN_WINS}.
+Blocks no pool name claims, 24 hours: {f"{100 * u['share']:.0f}% ({u['blocks']} of {u['of']}, {u['labels']} solo, unknown or category labels)" if u["share"] is not None else "-"}{f", prior week {100 * u['baseline_share']:.0f}%" if u["baseline_share"] is not None else ""}, alert at {int(100 * UNATTRIBUTED_ALERT)}%.
 Last concentration alert: {tt(last) if last else "none"}. The same numbers are in <a href="risk.json">risk.json</a>.</p>
 """
     return html_out, feed
@@ -3175,6 +3220,7 @@ def main():
     if args.explorer:
         explorer_check(args.explorer, st, top, chain[top], events, args.verbose)
 
+    rw = None
     if not args.no_rewards:
         try:
             rw = Rewards(sd)
@@ -3183,7 +3229,7 @@ def main():
         except Exception as e:  # noqa: BLE001
             print(f"{ts()} reward index failed: {e}")
 
-    concentration_checks(sd, st, events, NOW)
+    concentration_checks(sd, st, events, NOW, rw)
     competing_branch_checks(sd, st, events, NOW)
 
     finish(sd, args, st, state_path, events)
