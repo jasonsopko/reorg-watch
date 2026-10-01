@@ -1,0 +1,1091 @@
+{
+  "_readme": [
+    "Stratum/DATUM endpoint list for pool-probe.py.",
+    "'label' MUST match the attribution label reorg-watch.py prints, that is the join key.",
+    "Fill in host/port for each endpoint a pool advertises publicly. One entry per",
+    "advertised endpoint; a pool offering both v1 and DATUM gets two entries.",
+    "'expect' is what you think it is (stratum-v1 | datum | unknown); the probe records",
+    "what it actually finds and does not trust this field.",
+    "'source' is where you got it (pool website, miner config, Discord, date). Keep it,",
+    "it is the difference between evidence and hearsay.",
+    "Leave an endpoint with host:'' and the probe skips it.",
+    "'terms' is what the pool's own site says: sv1_fee, datum_fee, payout, with 'source' and 'checked' date. Self-reported; the survey passes it through unverified.",
+    "'sv1_closed' records a pool's own statement that its stratum path is closed, with the date and page; the probe still tests the ports.",
+    "'changes' is a short dated list of what pools changed, taken from their own pages; the page shows it newest first next to what the chain shows.",
+    "'closed': true on an endpoint marks one the pool's own site says is closed; it is still probed, but the page does not offer it.",
+    "'unclaimed': true on an endpoint means a third party named it, not the pool; it is probed and shown but never counted as the pool's own claim."
+  ],
+  "generated": "from the last 2016 blocks; share_pct and coinbase_class are informational",
+  "pools": [
+    {
+      "label": "AlphaPool",
+      "share_pct": 41.47,
+      "coinbase_class": {
+        "G": 827,
+        "D": 9
+      },
+      "link": "https://xbt.alphapool.tech/",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://us2.alphapool.tech:28916",
+          "expect": "datum",
+          "role": "DATUM pool",
+          "source": "https://xbt.alphapool.tech/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://us1.alphapool.tech:7333",
+          "expect": "stratum-v1",
+          "role": "pool gateway, US East",
+          "source": "https://xbt.alphapool.tech/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://us2.alphapool.tech:7333",
+          "expect": "stratum-v1",
+          "role": "pool gateway, US West",
+          "source": "https://xbt.alphapool.tech/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://eu1.alphapool.tech:7333",
+          "expect": "stratum-v1",
+          "role": "pool gateway, Europe",
+          "source": "https://xbt.alphapool.tech/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://sg1.alphapool.tech:7333",
+          "expect": "stratum-v1",
+          "role": "pool gateway, Asia",
+          "source": "https://xbt.alphapool.tech/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://us1.alphapool.tech:7777",
+          "expect": "stratum-v1",
+          "role": "pool gateway for iBeLink units",
+          "source": "https://xbt.alphapool.tech/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://us1.alphapool.tech:5555",
+          "expect": "stratum-v1",
+          "role": "old PPLNS pool, closed per the site 2026-09-25",
+          "source": "https://knots.alphapool.tech/ (closure notice read 2026-09-29; endpoint read 2026-09-12)",
+          "closed": true
+        },
+        {
+          "url": "stratum+tcp://us2.alphapool.tech:5555",
+          "expect": "stratum-v1",
+          "role": "old PPLNS pool, closed per the site 2026-09-25",
+          "source": "https://knots.alphapool.tech/ (closure notice read 2026-09-29; endpoint read 2026-09-12)",
+          "closed": true
+        },
+        {
+          "url": "stratum+tcp://eu1.alphapool.tech:5555",
+          "expect": "stratum-v1",
+          "role": "old PPLNS pool, closed per the site 2026-09-25",
+          "source": "https://knots.alphapool.tech/ (closure notice read 2026-09-29; endpoint read 2026-09-12)",
+          "closed": true
+        },
+        {
+          "url": "stratum+tcp://sg1.alphapool.tech:5555",
+          "expect": "stratum-v1",
+          "role": "old PPLNS pool, closed per the site 2026-09-25",
+          "source": "https://knots.alphapool.tech/ (closure notice read 2026-09-29; endpoint read 2026-09-12)",
+          "closed": true
+        }
+      ],
+      "notes": "Moved from a stratum v1 PPLNS pool (knots.alphapool.tech, closed 2026-09-25 per its own notice) to a DATUM pool paying miners in the coinbase, TIDES over 8 network difficulties. The DATUM pool also runs public stratum v1 gateways on port 7333 in four regions and 7777 for iBeLink units. The old 5555 ports still answer.",
+      "site_checked": "2026-09-29",
+      "terms": {
+        "sv1_fee": "2.95% plus 0.5% to the finder, on the pool's own gateways",
+        "datum_fee": "2.95% to operations plus 0.5% of the block to its finder",
+        "payout": "TIDES, 8 network difficulties of work, paid in the coinbase",
+        "source": "https://xbt.alphapool.tech/",
+        "checked": "2026-09-29"
+      },
+      "datum_documented": true,
+      "datum_pubkey": "b831b2d6f1eaedb3da5b9e3702728edea0a32d6ce783a1452b2861c4d1b74d6b4c2ad5461bcf43485a6bac2cedf8da43d51164262ef6bcdb27f2242ada066d29",
+      "own_addresses": [
+        "bc1qycx42j0mm2we68g5t8k0ul9sgccha0ewkawedw"
+      ],
+      "sv1_closed": {
+        "date": "since 2026-09-25",
+        "what": "the stratum v1 PPLNS pool on port 5555 is closed",
+        "source": "https://knots.alphapool.tech/ (notice read 2026-09-29)"
+      }
+    },
+    {
+      "label": "Bitcoin Xor",
+      "share_pct": 14.04,
+      "coinbase_class": {
+        "G": 257,
+        "D": 26
+      },
+      "link": "https://www.xorpool.com",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://datum.xorpool.com:28915",
+          "expect": "datum",
+          "role": "DATUM pool, US",
+          "source": "https://www.xorpool.com/datum (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://hk.datum.xorpool.com:28915",
+          "expect": "datum",
+          "role": "DATUM pool, Asia",
+          "source": "https://www.xorpool.com/datum (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://eu.datum.xorpool.com:28915",
+          "expect": "datum",
+          "role": "DATUM pool, Europe",
+          "source": "https://www.xorpool.com/datum (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://datum.xorpool.com:23335",
+          "expect": "stratum-v1",
+          "role": "pool gateway, US",
+          "source": "https://www.xorpool.com/ (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://hk.datum.xorpool.com:23335",
+          "expect": "stratum-v1",
+          "role": "pool gateway, Asia",
+          "source": "https://www.xorpool.com/ (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://eu.datum.xorpool.com:23335",
+          "expect": "stratum-v1",
+          "role": "pool gateway, Europe",
+          "source": "https://www.xorpool.com/ (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://datum.xorpool.com:23337",
+          "expect": "unknown",
+          "role": "listed on the site without a stated role; silent to a stratum subscribe",
+          "source": "https://www.xorpool.com/ (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://stratum.xorpool.com:23334",
+          "expect": "stratum-v1",
+          "role": "legacy solo, 5%; no longer on the site",
+          "source": "https://www.xorpool.com/ (read 2026-09-12; gone by 2026-09-29)"
+        }
+      ],
+      "notes": "DATUM-first pool: 1% with your own gateway, 2% on the pool's own gateways (port 23335), TIDES coinbase payouts. Regions US, HK, EU. The 23337 ports are listed on the site without a stated role. stratum.xorpool.com:23334 (legacy solo, 5%) is no longer on the site but still answers.",
+      "site_checked": "2026-09-29",
+      "datum_documented": true,
+      "datum_pubkey": "b83aedbba54ba2aa605c76859d97aebd16dece3284402b9fc874778a974da4acbb449f6ccda61625d700036f0487a05f5184f79a07abf2880da77352f4cc487e",
+      "terms": {
+        "sv1_fee": "2% on the pool's own gateways",
+        "datum_fee": "1%",
+        "payout": "TIDES, paid in the coinbase",
+        "source": "https://www.xorpool.com/datum",
+        "checked": "2026-09-29"
+      },
+      "own_addresses": [
+        "bc1qkvdax7aj0hmae0uvuezqsp6ckkttnrul9z3mwg"
+      ]
+    },
+    {
+      "label": "Lazarus",
+      "share_pct": 13.34,
+      "coinbase_class": {
+        "O": 241,
+        "D": 28
+      },
+      "link": "https://pool.lazarus-xbt.xyz/",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://stratum.lazarus-xbt.xyz:23334",
+          "expect": "stratum-v1",
+          "role": "public stratum",
+          "source": "https://pool.lazarus-xbt.xyz/connect (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://datum.lazarus-xbt.xyz:28915",
+          "expect": "datum",
+          "role": "DATUM pool",
+          "source": "https://pool.lazarus-xbt.xyz/api/pool (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://stratum.awokenlazarus.xyz:23334",
+          "expect": "stratum-v1",
+          "role": "old hostname, still answers",
+          "source": "pool site (read 2026-09-12)"
+        },
+        {
+          "url": "stratum+tcp://stratum.awokenlazarus.xyz:28915",
+          "expect": "datum",
+          "role": "old hostname",
+          "source": "pool site (read 2026-09-12)"
+        }
+      ],
+      "notes": "Site moved from pool.awokenlazarus.xyz to pool.lazarus-xbt.xyz (redirect). DATUM host, port and pubkey are published in its /api/pool feed. 12.5 points of the 25% public-stratum fee are credited to DATUM miners.",
+      "site_checked": "2026-09-29",
+      "terms": {
+        "sv1_fee": "25% on the public stratum from block 973,750 (15% before); 7.5% solo",
+        "datum_fee": "0%, plus a share of the public-stratum fee",
+        "payout": "TIDES, paid in the coinbase",
+        "source": "https://pool.lazarus-xbt.xyz/connect",
+        "checked": "2026-09-29"
+      },
+      "datum_documented": true,
+      "datum_pubkey": "29120606bbbfdeb0dcb259d13ed1fba9e6ff198ff6a0152cffb7608dc1c266bd17532393738aee7edf9aa0c9ec93b835256971f186da878f77fb3ed273dff30a"
+    },
+    {
+      "label": "CONVOY",
+      "share_pct": 5.51,
+      "coinbase_class": {
+        "D": 111
+      },
+      "link": "https://convoy.xyz",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://mine.convoy.xyz:3333",
+          "expect": "stratum-v1",
+          "source": "pool site (failover only)",
+          "role": "pool stratum, failover"
+        },
+        {
+          "url": "stratum+tcp://datum-beta1.mine.convoy.xyz:28915",
+          "expect": "datum",
+          "source": "compiled-in default of CONVOY's own gateway build, CONVOYMining/datum_gateway src/datum_conf.c (read 2026-09-12)",
+          "role": "DATUM pool"
+        }
+      ],
+      "notes": "The docs do not print a pool host because CONVOY ships its own gateway build with the host and pubkey compiled in as defaults; mine.convoy.xyz:3333 is documented only as a failover. Its gateway sends the version 3 handshake.",
+      "site_checked": "2026-09-29",
+      "datum_pubkey": "dbb11fa0c2b5403e4f798fa6071bb97e6079d219598366032fdf2ae01962b13c5e66e2be7d6b008f0b2603f3e6f6fc64768fa786c8129c46d3e30a5867734b62",
+      "terms": {
+        "sv1_fee": "2% on the failover stratum",
+        "datum_fee": "1%",
+        "payout": "TIDES; the site says paid direct from the coinbase",
+        "source": "https://convoy.xyz/",
+        "checked": "2026-09-29"
+      },
+      "own_addresses": [
+        "bc1qgymrl397jltqq0g9z2suqtghlfrz3yzm0m2xjw"
+      ]
+    },
+    {
+      "label": "nodeStratum",
+      "share_pct": 3.08,
+      "coinbase_class": {
+        "O": 62
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "label": "DATUM miners",
+      "share_pct": 2.33,
+      "coinbase_class": {
+        "G": 46,
+        "D": 1
+      },
+      "link": "https://ocean.xyz/docs/datum",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "Coinbase tags left by independent gateway users; not one operator.",
+      "kind": "category"
+    },
+    {
+      "label": "PYBLOCK CAROUSEL",
+      "share_pct": 1.93,
+      "coinbase_class": {
+        "G": 39
+      },
+      "link": "https://b.pyblock.xyz:8443/carousel.php",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://pool.pyblock.xyz:4445",
+          "expect": "stratum-v1",
+          "role": "CAROUSEL, GPU/CPU",
+          "source": "https://b.pyblock.xyz:8443/home.php (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://pool.pyblock.xyz:23112",
+          "expect": "stratum-v1",
+          "role": "CAROUSEL, ASIC",
+          "source": "https://b.pyblock.xyz:8443/home.php (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://pool.pyblock.xyz:30110",
+          "expect": "stratum-v1",
+          "role": "CAROUSEL, GPU/ASIC",
+          "source": "https://b.pyblock.xyz:8443/carousel.php (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://b.pyblock.xyz:28916",
+          "expect": "datum",
+          "role": "CAROUSEL DATUM pool",
+          "source": "https://b.pyblock.xyz:8443/carousel.php (read 2026-09-29)"
+        }
+      ],
+      "notes": "Blocks built over DATUM carry their own tag and are counted under PYBLOCK CAROUSEL DATUM.",
+      "site_checked": "2026-09-29",
+      "datum_documented": true,
+      "terms": {
+        "sv1_fee": "1% pool fee plus 1% to the template supplier",
+        "datum_fee": "1%",
+        "payout": "finder paid in the coinbase",
+        "source": "https://b.pyblock.xyz:8443/carousel.php",
+        "checked": "2026-09-22"
+      },
+      "datum_pubkey": "36f94e73ae4c9b9c479c544f035bc9e69565e9d882112031cb27032ecbac818e35a7976501d5cd0453f9fc3e9823127839225e89c45a2cc80902ba0a7e09577b",
+      "own_addresses": [
+        "1PyBLoCKdiaC46vD9CWcmxa3ey2VzSc5Q2"
+      ]
+    },
+    {
+      "label": "Wild",
+      "share_pct": 1.59,
+      "coinbase_class": {
+        "G": 32
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "RIPTIDE",
+      "share_pct": 1.29,
+      "coinbase_class": {
+        "D": 26
+      },
+      "link": "https://riptide.maveth.ca",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://riptide.maveth.ca:29120",
+          "expect": "datum",
+          "role": "DATUM pool, min diff 2048",
+          "source": "https://riptide.maveth.ca/connect (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://sv1.riptide.maveth.ca:29128",
+          "expect": "stratum-v1",
+          "role": "public stratum",
+          "source": "https://riptide.maveth.ca/connect (read 2026-09-29)"
+        }
+      ],
+      "notes": "Ports moved in September: DATUM on riptide.maveth.ca 29120 (min diff 2048; 29121 at 32768 is in the site's port table), optional-fee variants 29122/29123, experimental anti-withholding ports 29130/29131; public stratum sv1.riptide.maveth.ca:29128. Pool pubkey not printed on the page.",
+      "site_checked": "2026-09-29",
+      "terms": {
+        "sv1_fee": "variable, 1% when checked, half of it routed to DATUM miners",
+        "datum_fee": "0%",
+        "payout": "TIDES by share difficulty, paid in the coinbase",
+        "source": "https://riptide.maveth.ca/connect",
+        "checked": "2026-09-29"
+      },
+      "datum_documented": true
+    },
+    {
+      "label": "Solo bc1q8zqj",
+      "share_pct": 1.19,
+      "coinbase_class": {
+        "O": 23,
+        "D": 1
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "solo",
+      "share_pct": 1.04,
+      "coinbase_class": {
+        "G": 21
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "Pow.re",
+      "share_pct": 0.79,
+      "coinbase_class": {
+        "D": 16
+      },
+      "link": "https://pow.re/",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "Hashrate marketplace, not a pool: it routes customer hashrate into contracts and back to their own pool. No public stratum endpoint of its own.",
+      "kind": "marketplace",
+      "site_checked": "2026-09-12"
+    },
+    {
+      "label": "maxi",
+      "share_pct": 0.74,
+      "coinbase_class": {
+        "G": 15
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "Talking",
+      "share_pct": 0.64,
+      "coinbase_class": {
+        "G": 13
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "TIDES",
+      "share_pct": 0.5,
+      "coinbase_class": {
+        "D": 10
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": ""
+    },
+    {
+      "label": "Solo bc1qt7pu",
+      "share_pct": 0.4,
+      "coinbase_class": {
+        "G": 8
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "CrabBoss",
+      "share_pct": 0.4,
+      "coinbase_class": {
+        "G": 8
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "Mining-Dutch",
+      "share_pct": 0.4,
+      "coinbase_class": {
+        "O": 8
+      },
+      "link": "https://www.mining-dutch.nl/",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "Multi-algorithm pool. The BLAKE2b connection details are rendered by client-side script, so no endpoint could be read from the page.",
+      "site_checked": "2026-09-12"
+    },
+    {
+      "label": "Catbus",
+      "share_pct": 0.3,
+      "coinbase_class": {
+        "G": 2,
+        "O": 4
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "Happy",
+      "share_pct": 0.3,
+      "coinbase_class": {
+        "G": 6
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "PYBLOCK CHIRP",
+      "share_pct": 0.3,
+      "coinbase_class": {
+        "G": 6
+      },
+      "link": "https://b.pyblock.xyz:8443/chirp.php",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://pool.pyblock.xyz:5574",
+          "expect": "stratum-v1",
+          "role": "CHIRP, GPU/CPU (pool-run DATUM gateway)",
+          "source": "https://b.pyblock.xyz:8443/chirp.php (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://pool.pyblock.xyz:23113",
+          "expect": "stratum-v1",
+          "role": "CHIRP, ASIC (pool-run DATUM gateway)",
+          "source": "https://b.pyblock.xyz:8443/chirp.php (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://b.pyblock.xyz:28917",
+          "expect": "datum",
+          "role": "CHIRP DATUM pool",
+          "source": "https://b.pyblock.xyz:8443/chirp.php (read 2026-09-29)"
+        }
+      ],
+      "notes": "Since 2026-09-23 every CHIRP block is built through DATUM; the public ports 5574 and 23113 are DATUM gateways run by PyBLOCK (per the site).",
+      "site_checked": "2026-09-29",
+      "datum_documented": true,
+      "terms": {
+        "sv1_fee": "1% pool fee plus 1% to the node-runner",
+        "datum_fee": "0.4%",
+        "payout": "syndicate paid in the coinbase",
+        "source": "https://b.pyblock.xyz:8443/chirp.php",
+        "checked": "2026-09-22"
+      },
+      "datum_pubkey": "cf995bb5b975ef4b90932f0608c98a033679092e976982621243cd1226803c6417442870dff8372b11363d8f80665b1f298cc23132bf2dab23958a4bcc7d4f72",
+      "own_addresses": [
+        "1PyBLoCKdiaC46vD9CWcmxa3ey2VzSc5Q2"
+      ]
+    },
+    {
+      "label": "Second",
+      "share_pct": 0.3,
+      "coinbase_class": {
+        "D": 6
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "Mycology",
+      "share_pct": 0.25,
+      "coinbase_class": {
+        "G": 5
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "name",
+      "share_pct": 0.25,
+      "coinbase_class": {
+        "G": 5
+      },
+      "link": "",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": ""
+        }
+      ],
+      "notes": "",
+      "kind": "individual"
+    },
+    {
+      "label": "B2Pool",
+      "share_pct": null,
+      "coinbase_class": {},
+      "link": "https://b2pool.io",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://de.b2pool.io:28915",
+          "expect": "datum",
+          "role": "DATUM pool",
+          "source": "https://b2pool.io/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://de.b2pool.io:3333",
+          "expect": "stratum-v1",
+          "role": "pool stratum, ASIC",
+          "source": "https://b2pool.io/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://de.b2pool.io:23333",
+          "expect": "stratum-v1",
+          "role": "pool-run DATUM gateway",
+          "source": "https://b2pool.io/start (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://ord.b2pool.io:3333",
+          "expect": "stratum-v1",
+          "role": "pool stratum, ASIC, Chicago",
+          "source": "https://b2pool.io/ (read 2026-09-29)"
+        },
+        {
+          "url": "stratum2+tcp://de.b2pool.io:13333",
+          "expect": "stratum-v2",
+          "role": "pool stratum v2",
+          "source": "https://b2pool.io/start (read 2026-09-29)"
+        }
+      ],
+      "notes": "Offers stratum v1 (ASIC 3333, FPGA/GPU 4444, CPU 5555, solo 3334), pool-run DATUM gateways on 23333/24444/25555, DATUM on 28915 and Stratum V2 on 13333, in de/hel/ord/lax/ua regions. Its site asks for gateway 0.1.23 or the C gateway from 40cf813 on, which is the version 3 handshake.",
+      "datum_pubkey": "8ba1f7693d117620b1e5a46828f1cd187efe81114e9cee6a063bfbbe2f1b6cff0fc681d3c1ca7cb19c0e0dbddfbea65d5509e974e7f0000112dd07cba744a716",
+      "site_checked": "2026-09-29",
+      "terms": {
+        "sv1_fee": "1% (0% on the pool-run gateway ports 23333/24444/25555 per the start page)",
+        "datum_fee": "0%",
+        "payout": "TIDES, 8 network difficulties, paid in the coinbase; solo pays the finder",
+        "source": "https://b2pool.io/start",
+        "checked": "2026-09-29"
+      },
+      "kind": "pool"
+    },
+    {
+      "label": "MinePoolIs",
+      "share_pct": null,
+      "coinbase_class": {},
+      "link": "https://minepoolis.com/blake2b",
+      "site_checked": "2026-09-29",
+      "notes": "Fee stated as 2.00% falling toward a 0.10% target. No pool pubkey published, so a DATUM handshake is not possible. Not yet matched to an on-chain label.",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://stratum.minepoolis.com:4481",
+          "expect": "stratum-v1",
+          "source": "https://minepoolis.com/blake2b (read 2026-09-12)",
+          "role": "PPLNS"
+        },
+        {
+          "url": "stratum+tcp://stratum.minepoolis.com:4482",
+          "expect": "stratum-v1",
+          "source": "https://minepoolis.com/blake2b (read 2026-09-12)",
+          "role": "SOLO"
+        },
+        {
+          "url": "stratum+tcp://stratum.minepoolis.com:4483",
+          "expect": "datum",
+          "source": "https://minepoolis.com/blake2b (read 2026-09-12)",
+          "role": "listed as DATUM on the site"
+        }
+      ],
+      "terms": {
+        "sv1_fee": "2.00%, stated as falling toward 0.10%",
+        "datum_fee": "listed, no pubkey published",
+        "payout": "PPLNS and solo ports",
+        "source": "https://minepoolis.com/blake2b",
+        "checked": "2026-09-29"
+      }
+    },
+    {
+      "label": "Tyger",
+      "share_pct": null,
+      "coinbase_class": {},
+      "kind": "pool",
+      "link": "https://tygerpool.com/",
+      "site_checked": "2026-09-29",
+      "datum_pubkey": "8918e6a6437f9238118da5ce657f90b866dd4d31820d07e798ccd1b8986804ae36d1e494e919fa5e0ba251aec1c631e260f89628ebe6ebafc4b276554f295c3f",
+      "notes": "0% launch fee. Site says stratum is paused while they move to DATUM; DATUM only. Blocks appear on chain under the label Tyger.",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://tygerpool.com:28915",
+          "expect": "datum",
+          "source": "https://tygerpool.com/ (read 2026-09-12)",
+          "role": "DATUM pool"
+        },
+        {
+          "url": "stratum+tcp://tygerpool.com:23334",
+          "expect": "stratum-v1",
+          "role": "gateway listener documented on the site; site says stratum is paused",
+          "source": "https://tygerpool.com/ (read 2026-09-12)",
+          "closed": true
+        }
+      ],
+      "terms": {
+        "sv1_fee": "stratum paused while moving to DATUM",
+        "datum_fee": "0% launch fee",
+        "source": "https://tygerpool.com/",
+        "checked": "2026-09-29"
+      },
+      "sv1_closed": {
+        "date": "no date given, on the site since at least 2026-09-12",
+        "what": "stratum is paused while moving to DATUM",
+        "source": "https://tygerpool.com/ (read 2026-09-29)"
+      }
+    },
+    {
+      "label": "Rabid",
+      "share_pct": null,
+      "coinbase_class": {},
+      "kind": "pool",
+      "link": "https://pool.rabidmining.com/xbt",
+      "site_checked": "2026-09-29",
+      "notes": "Multi-coin pool. XBT stratum (including solo on 3334) was retired 2026-09-25 18:00 UTC per the site; the pool is DATUM only now, PPLNS on 28916 and a solo port 28926 with its own pubkey. Requires the version 3 handshake and refuses version 1 gateways.",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://xbt.rabidmining.com:28916",
+          "expect": "datum",
+          "role": "DATUM pool, PPLNS",
+          "source": "https://pool.rabidmining.com/xbt (read 2026-09-29)"
+        },
+        {
+          "url": "stratum+tcp://xbt.rabidmining.com:3333",
+          "expect": "stratum-v1",
+          "role": "old PPLNS stratum, retired per the site 2026-09-25",
+          "source": "https://pool.rabidmining.com/xbt (read 2026-09-29)",
+          "closed": true
+        },
+        {
+          "url": "stratum+tcp://xbt.rabidmining.com:3334",
+          "expect": "stratum-v1",
+          "role": "old solo stratum, retired per the site 2026-09-25",
+          "source": "https://pool.rabidmining.com/xbt (read 2026-09-29)",
+          "closed": true
+        }
+      ],
+      "terms": {
+        "sv1_fee": "stratum retired 2026-09-25",
+        "datum_fee": "1%, taken as an output in the coinbase",
+        "payout": "PPLNS paid in the coinbase; solo port pays the finder 99%",
+        "source": "https://pool.rabidmining.com/xbt",
+        "checked": "2026-09-29"
+      },
+      "datum_documented": true,
+      "datum_pubkey": "9f41d02bfaf09d18d0db09711912a946ed2698c2f5507ab4f79a68655fb1f476e5127f60501b739eb6e89606bb0267f74750ebb55a75c7ef21434bf60ca66920",
+      "sv1_closed": {
+        "date": "since 2026-09-25 18:00 UTC",
+        "what": "all XBT stratum ports are retired",
+        "source": "https://pool.rabidmining.com/xbt (read 2026-09-29)"
+      }
+    },
+    {
+      "label": "PYBLOCK CAROUSEL DATUM",
+      "share_pct": null,
+      "coinbase_class": {},
+      "site_checked": "2026-09-22",
+      "datum_documented": true,
+      "link": "https://b.pyblock.xyz:8443/carousel.php",
+      "notes": "",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://b.pyblock.xyz:28916",
+          "expect": "datum",
+          "source": "https://b.pyblock.xyz:8443/carousel.php (read 2026-09-22)",
+          "role": "CAROUSEL DATUM pool"
+        }
+      ],
+      "datum_pubkey": "36f94e73ae4c9b9c479c544f035bc9e69565e9d882112031cb27032ecbac818e35a7976501d5cd0453f9fc3e9823127839225e89c45a2cc80902ba0a7e09577b",
+      "terms": {
+        "datum_fee": "1%",
+        "payout": "finder paid in the coinbase",
+        "source": "https://b.pyblock.xyz:8443/carousel.php",
+        "checked": "2026-09-22"
+      },
+      "own_addresses": [
+        "1PyBLoCKdiaC46vD9CWcmxa3ey2VzSc5Q2"
+      ]
+    },
+    {
+      "label": "PYBLOCK WAVICLES",
+      "share_pct": null,
+      "coinbase_class": {},
+      "site_checked": "2026-09-29",
+      "datum_documented": true,
+      "link": "https://b.pyblock.xyz:8443/wavicles.php",
+      "notes": "",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://b.pyblock.xyz:23115",
+          "expect": "stratum-v1",
+          "role": "WAVICLES via PyBLOCK's stratum, GPU/CPU; port no longer printed on the page",
+          "source": "https://b.pyblock.xyz:8443/wavicles.php (read 2026-09-22)"
+        },
+        {
+          "url": "stratum+tcp://b.pyblock.xyz:23114",
+          "expect": "stratum-v1",
+          "role": "WAVICLES via PyBLOCK's stratum, ASIC; port no longer printed on the page",
+          "source": "https://b.pyblock.xyz:8443/wavicles.php (read 2026-09-22)"
+        },
+        {
+          "url": "stratum+tcp://b.pyblock.xyz:28915",
+          "expect": "datum",
+          "role": "WAVICLES DATUM pool",
+          "source": "https://b.pyblock.xyz:8443/wavicles.php (read 2026-09-29)"
+        }
+      ],
+      "datum_pubkey": "b5e0b0326b964a92f3046c73a76b9e98173e0c3ea0e0ca771f4e6a3dd92e2935b2caad2a088fdd7bf0a48fc0c41776a9abb13c7d4c6964b53a9ceee4c775e036",
+      "terms": {
+        "sv1_fee": "2.9%",
+        "datum_fee": "0.4%",
+        "payout": "work window paid in the coinbase",
+        "source": "https://b.pyblock.xyz:8443/wavicles.php",
+        "checked": "2026-09-22"
+      },
+      "own_addresses": [
+        "1PyBLoCKdiaC46vD9CWcmxa3ey2VzSc5Q2"
+      ]
+    },
+    {
+      "label": "OmegaPool",
+      "kind": "pool",
+      "link": "https://omegapool.tech/",
+      "site_checked": "2026-09-29",
+      "datum_documented": true,
+      "datum_pubkey": "e0af9254ca56f93666922eb268c57f3d62f0132eb6f204db0d3124efbe74fc58028496951ea1e68041986c274b66dedb9a8dfa689403757a7868084d4355bb63",
+      "notes": "Runs ratum prime (its stats feed says version 0.1.54). pool.iohzrd.tech serves the same site; the pool's public gateway is tagged gateway.iohzrd.tech. Fee 0.5% on the coinbase, 10% on public-gateway work with 7.5 points of that credited back to own-gateway miners (fee_bps fields in /stats.json).",
+      "terms": {
+        "sv1_fee": "10% on the pool's public gateway",
+        "datum_fee": "0.5%",
+        "payout": "paid in the coinbase to the miners of the window",
+        "source": "https://omegapool.tech/stats.json",
+        "checked": "2026-09-29"
+      },
+      "endpoints": [
+        {
+          "url": "stratum+tcp://omegapool.tech:28915",
+          "expect": "datum",
+          "role": "DATUM pool",
+          "source": "https://omegapool.tech/connect (read 2026-09-29, from the page script)"
+        },
+        {
+          "url": "stratum+tcp://gateway.iohzrd.tech:23334",
+          "expect": "stratum-v1",
+          "role": "public gateway named by a third party (Lazarus's site), not by OmegaPool's own pages",
+          "source": "Lazarus site listed it as a public gateway (2026-09-12); refused when probed 2026-09-29",
+          "unclaimed": true
+        }
+      ]
+    },
+    {
+      "label": "xxxbtcb2",
+      "kind": "pool",
+      "link": "https://www.dxpool.com/",
+      "site_checked": "2026-09-29",
+      "notes": "DxPool: primary coinbase tag dxpool with gateway names as the secondary tag (xxxbtcb2, xywl5, dxgw); the explorer list names the label after the first gateway seen. Its site is script-rendered and shows no BLAKE2b endpoint or pubkey to a plain fetch, so nothing here can be probed.",
+      "endpoints": [
+        {
+          "host": "",
+          "port": 0,
+          "tls": false,
+          "expect": "unknown",
+          "source": "https://www.dxpool.com/ (read 2026-09-29, script-rendered, no endpoint readable)"
+        }
+      ]
+    },
+    {
+      "label": "TerminusPool",
+      "kind": "pool",
+      "link": "https://terminuspool.xyz/",
+      "site_checked": "2026-10-01",
+      "notes": "Runs ratum prime (site footer says TerminusPool v0.2.43). First block 974025 on 2026-09-25. The site lists only the DATUM endpoint; port 23334 on the same host answers a stratum subscribe with work for this chain (probe 2026-10-01), so it is listed here as found, not advertised. Pays miners in the coinbase plus 1 sat to the pool script.",
+      "terms": {
+        "sv1_fee": "no stratum path on the site",
+        "datum_fee": "0% through 2026-11-05, 1% after",
+        "payout": "paid in the coinbase to the miners of the window",
+        "source": "https://terminuspool.xyz/",
+        "checked": "2026-10-01"
+      },
+      "datum_documented": true,
+      "datum_pubkey": "7727d03af18663f7d5e96cdb72fabcf3003fd722a2ef22198e8d812b67da15ccc4be34e4334fe7819de3eec68b4d6119e1315fec2a4e320cf5e620033f82d726",
+      "own_addresses": [
+        "bc1qljtpmtvh9ph35jxn8zmh3fz92f0jngkanjn345"
+      ],
+      "endpoints": [
+        {
+          "url": "stratum+tcp://datum.terminuspool.xyz:28915",
+          "expect": "datum",
+          "role": "DATUM pool",
+          "source": "https://terminuspool.xyz/ (read 2026-10-01); pubkey from /api/stats primePubkey"
+        },
+        {
+          "url": "stratum+tcp://datum.terminuspool.xyz:23334",
+          "expect": "stratum-v1",
+          "role": "stratum port the site does not list; found by probe, hands out work for this chain",
+          "source": "reorg.watch probe 2026-10-01; not on https://terminuspool.xyz/ (read 2026-10-01)",
+          "unclaimed": true
+        }
+      ]
+    },
+    {
+      "label": "RouteHash",
+      "kind": "pool",
+      "link": "https://app.routehash.com/",
+      "site_checked": "2026-10-01",
+      "notes": "A hashrate rental marketplace that also runs its own DATUM pool (the \"House Pool\", ratum prime). Rigs on the marketplace connect over stratum to stratum.routehash.com:23335 and are forwarded to the House Pool or to another operator's listed host:port; that port answers a subscribe but gave an unregistered worker no work (probe 2026-10-01), so it is not listed here. No block with a RouteHash tag yet.",
+      "terms": {
+        "sv1_fee": "marketplace stratum, registered rigs only",
+        "datum_fee": "XBT take free per the site",
+        "payout": "House Pool pays in the block",
+        "source": "https://app.routehash.com/",
+        "checked": "2026-10-01"
+      },
+      "datum_documented": true,
+      "datum_pubkey": "b1ccb80129763858d52249e4fef4f9d6aff97921543abf0559e03819a03aab1093872ef7b8f0481635d0221485379948a812c3d2ffcec3fe7cbc4f8ccec1d735",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://pool.routehash.com:28915",
+          "expect": "datum",
+          "role": "DATUM pool (House Pool)",
+          "source": "https://app.routehash.com/api/status datum_prime host, port and pubkey (read 2026-10-01)"
+        }
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "date": "2026-10-01",
+      "pool": "RouteHash",
+      "text": "Added here. RouteHash is a hashrate rental marketplace that also runs a DATUM pool; rented and idle rigs connect to its stratum port and are forwarded to its own pool or to another operator's listed port. Only the DATUM endpoint is listed, since the marketplace port gives no work to an unregistered worker.",
+      "source": "https://app.routehash.com/ (read 2026-10-01)"
+    },
+    {
+      "date": "2026-09-25",
+      "pool": "TerminusPool",
+      "text": "New DATUM pool; first block 974025. 0% DATUM fee through 2026-11-05, 1% after.",
+      "source": "https://terminuspool.xyz/ (read 2026-10-01)"
+    },
+    {
+      "date": "2026-09-25",
+      "pool": "AlphaPool",
+      "text": "Closed its stratum v1 PPLNS pool and moved to a DATUM pool (xbt.alphapool.tech): miners run their own gateway, every block pays them in the coinbase, TIDES over 8 network difficulties, 2.95% to operations plus 0.5% to the block's finder. Its public stratum gateways moved to port 7333.",
+      "source": "https://knots.alphapool.tech/ and https://xbt.alphapool.tech/ (read 2026-09-29)"
+    },
+    {
+      "date": "2026-09-25",
+      "pool": "Rabid",
+      "text": "Retired all XBT stratum ports, including solo; DATUM only, PPLNS on 28916 and a solo port on 28926, version 3 handshake required.",
+      "source": "https://pool.rabidmining.com/xbt (read 2026-09-29)"
+    },
+    {
+      "date": "2026-09-23",
+      "pool": "PYBLOCK CHIRP",
+      "text": "Every CHIRP block is now built through DATUM; the public ports 5574 and 23113 are gateways run by PyBLOCK.",
+      "source": "https://b.pyblock.xyz:8443/chirp.php (read 2026-09-29)"
+    },
+    {
+      "date": "2026-09-22",
+      "pool": "Lazarus",
+      "text": "Public-stratum fee raised from 15% to 25% from block 973,750; 12.5 points of it are credited to DATUM miners. Site moved to pool.lazarus-xbt.xyz.",
+      "source": "https://pool.lazarus-xbt.xyz/connect (read 2026-09-29)"
+    }
+  ]
+}

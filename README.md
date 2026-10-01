@@ -136,6 +136,41 @@ the cron log stays empty until something happens.
 
 On testnet4 add `--rest http://127.0.0.1:48332/rest --floor 150308`.
 
+### The other scripts
+
+Everything reorg.watch runs is in this repository. The page sections that
+read a state file get it from these, each run from its own cron line:
+
+```
+* * * * *    $HOME/reorg-watch/forktips/chain-tips.py
+* * * * *    $HOME/reorg-watch/forktips/tip-watch.py
+*/5 * * * *  $HOME/reorg-watch/forktips/peer-crawl.py --limit 60 --threads 14 --timeout 10
+35 * * * *   $HOME/reorg-watch/poolprobe/pool-site-watch.py
+47 * * * *   $HOME/reorg-watch/poolprobe/pool-survey.py --out $HOME/.reorg-watch/pool-survey.json
+```
+
+- `forktips/chain-tips.py` reads `getchaintips` over RPC and writes
+  `chain-tips.json`, so branches the node saw but never switched to show up
+  in the block tree. It needs RPC credentials in `~/.reorg-watch/rpc.conf`
+  or the node's cookie.
+- `forktips/tip-watch.py` polls the REST tip a few times a minute and
+  rebuilds the page as soon as the height changes, instead of waiting for
+  the next minute.
+- `forktips/peer-crawl.py` connects once to each of the node's own peers and
+  each address in the BLAKE2b seed file, sends a version and a `getheaders`,
+  and compares the headers that come back with ours height by height
+  (`peer-probe.py`, with `hdrv2.py` for the 164-byte header hash). It writes
+  `peer-crawl.json` for the peer agreement panel.
+- `poolprobe/` holds the pool survey described under Choosing a pool, and
+  `pool-endpoints.json`, the hand-kept list of pool endpoints with the page
+  and date each one was read from.
+
+Alert mail from `tip-watch.py` and `pool-site-watch.py` goes to the address
+in `~/.reorg-watch/mailto`, one line. Without that file they mail nothing.
+`datum-check.py` keeps its identity key in
+`~/.reorg-watch/datum-check-keys.json` and creates it on first run; that file
+stays private.
+
 ## Output
 
 Everything lives in `~/.reorg-watch/` (change with `--state`):
@@ -236,7 +271,7 @@ are written next to the page as `risk.json`.
 
 A table for someone deciding where to point a miner, built from
 `pool-survey.json` and the coinbase index. The survey is made by three
-scripts that live next to the watcher, not in this repository:
+scripts in `poolprobe/`:
 
 - `pool-site-watch.py` reads each pool's own pages every hour and writes
   `site-endpoints.json`, every host:port and DATUM pubkey the pages show,
