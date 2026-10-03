@@ -78,9 +78,10 @@ def spk_address():
 
 
 def probe_worker(path=os.path.join(SD, "probe-worker.json")):
-    """The throwaway worker the probe authorizes on ports a site calls closed: a valid
-    P2WPKH address made from random bytes on first use (no key behind it, nothing is
-    ever mined to it) plus a worker name that says who is asking."""
+    """The throwaway worker the probe authorizes on ports a site calls closed and on ports
+    that answer a subscribe without a job: a valid P2WPKH address made from random bytes
+    on first use (no key behind it, nothing is ever mined to it) plus a worker name that
+    says who is asking."""
     try:
         return json.load(open(path))["username"]
     except Exception:  # noqa: BLE001
@@ -524,8 +525,11 @@ def main():
                 stratum_targets.append((host, port, tls))
                 if ep.get("discovered") and datum_on and pubkey:
                     datum_targets.append((host, port, pubkey, False))  # unknown port: try both, once
+        # A port a site calls closed always gets the throwaway worker; any other port gets it
+        # only when it answers the subscribe without a job, so "hands out work" means a job
+        # for this chain reached a worker the pool has never seen.
         closed_ports = {(h, pt) for _, h, pt, _, ep in targets if ep.get("closed")}
-        worker = probe_worker() if closed_ports else None
+        worker = probe_worker()
         seen = set()
         with open(args.log, "a") as log:
             for host, port, tls in stratum_targets:
@@ -533,7 +537,7 @@ def main():
                     continue
                 seen.add((host, port))
                 r = pp.probe(host, port, tls, args.timeout, pp.DEFAULT_UA, args.min_diff,
-                             authorize=worker if (host, port) in closed_ports else None)
+                             authorize=worker, authorize_if_idle=(host, port) not in closed_ports)
                 ph = (r["facts"].get("job") or {}).get("prevhash")
                 if ph:
                     r["built_on"] = pp.resolve_prevhash(ph, args.rest.rstrip("/"), 25)
@@ -674,13 +678,15 @@ def main():
         "shared_templates": shared,
         "site_read": site.get("generated"),
         "datum_checks": "real handshakes" if datum_on else ("skipped: " + (DC_WHY or "--no-datum")),
-        "method": ("Stratum endpoints are probed with one mining.subscribe and no credentials, and the "
-                   "job they hand out is matched to this chain. DATUM endpoints are probed with one real "
-                   "DATUM handshake against the pool's published pubkey and the session is closed as soon "
-                   "as the reply is verified. Endpoints come from the hand-kept list and from the pool's "
-                   "own pages as last read. Software is named by matching the subscribe reply to each "
-                   "project's own source. On-chain class and payout shape come from the coinbase index "
-                   "this site already keeps."),
+        "method": ("Stratum endpoints are probed with one mining.subscribe and no credentials, and the job "
+                   "they hand out is matched to this chain; a port that answers without a job, or one the "
+                   "pool's site calls closed, is also sent one mining.authorize with a throwaway worker (an "
+                   "address with no key behind it), and no share is ever submitted. DATUM endpoints are "
+                   "probed with one real DATUM handshake against the pool's published pubkey and the session "
+                   "is closed as soon as the reply is verified. Endpoints come from the hand-kept list and "
+                   "from the pool's own pages as last read. Software is named by matching the subscribe "
+                   "reply to each project's own source. On-chain class and payout shape come from the "
+                   "coinbase index this site already keeps."),
     }, open(args.out + ".tmp", "w"), indent=2)
     os.replace(args.out + ".tmp", args.out)
     n_checks = sum(1 for r in rows for e in r["endpoints"] if e.get("datum_check"))

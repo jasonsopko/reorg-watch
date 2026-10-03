@@ -7,7 +7,9 @@ opening exchange any miner makes against a public endpoint, once per run. It nev
 submits a share. When the caller passes authorize=<user>, and only then, it also
 sends one mining.authorize with that throwaway worker after the subscribe and
 records the answer and whether jobs keep coming: the survey does this on ports a
-pool's own site calls closed, to see whether the pool still takes workers.
+pool's own site calls closed, to see whether the pool still takes workers, and,
+with authorize_if_idle, on any port that answers the subscribe without a job, since
+some servers send work only to an authorized worker.
 
 What a result means: this shows what a pool OFFERS, not how any particular block was
 built. A pool can offer both Stratum v1 and DATUM. "Speaks v1" is evidence; "only
@@ -25,10 +27,11 @@ Usage: pool-probe.py [--endpoints FILE] [--out FILE] [--label NAME] [--delay S]
   --dry-run         print what would be probed and exit
 """
 
-import argparse, json, os, socket, ssl, sys, time
+import argparse, json, os, re, socket, ssl, sys, time
 from datetime import datetime, timezone
 
 DEFAULT_UA = "reorg.watch-probe/0.1 (protocol survey; contact via reorg.watch)"
+NOTIFY_METHOD = re.compile(rb'"method"\s*:\s*"mining\.notify"')
 
 
 def now():
@@ -268,7 +271,24 @@ def authorize_facts(lines, closed):
     return out
 
 
-def probe(host, port, tls, timeout, ua, min_diff=None, authorize=None):
+def subscribed_without_job(raw):
+    """True when the subscribe was answered and no mining.notify came with it."""
+    answered = False
+    for ln in raw.decode("utf-8", "replace").split("\n"):
+        try:
+            msg = json.loads(ln)
+        except Exception:
+            continue
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("method") == "mining.notify":
+            return False
+        if msg.get("id") == 1 and isinstance(msg.get("result"), list):
+            answered = True
+    return answered
+
+
+def probe(host, port, tls, timeout, ua, min_diff=None, authorize=None, authorize_if_idle=False):
     rec = {"host": host, "port": port, "tls": tls, "probed_at": now(), "configure_min_diff": min_diff}
     t0 = time.monotonic()
     sock = None
@@ -294,6 +314,7 @@ def probe(host, port, tls, timeout, ua, min_diff=None, authorize=None):
         sock.sendall(req.encode())
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline and len(raw) < 65536:
+            sock.settimeout(max(0.1, deadline - time.monotonic()))
             try:
                 chunk = sock.recv(4096)
             except socket.timeout:
@@ -304,20 +325,28 @@ def probe(host, port, tls, timeout, ua, min_diff=None, authorize=None):
             if b"\n" in raw and rec.get("first_byte_ms") is None:
                 rec["first_byte_ms"] = round((time.monotonic() - t0) * 1000, 1)
             # keep reading until a COMPLETE mining.notify line is in hand: it carries
-            # the template the pool built, which is what links an endpoint to a payout
-            if b"mining.notify" in raw and raw.rfind(b"\n") > raw.find(b"mining.notify"):
+            # the template the pool built, which is what links an endpoint to a payout.
+            # The subscribe reply names mining.notify too, so match the method, and give
+            # the job a few seconds after that reply before calling the port idle.
+            job = NOTIFY_METHOD.search(raw)
+            if job and raw.rfind(b"\n") > job.start():
                 break
             if raw.count(b"\n") >= 6:
                 break
-        if authorize and raw:
+            if subscribed_without_job(raw[:raw.rfind(b"\n") + 1]):
+                deadline = min(deadline, time.monotonic() + 3)
+        if authorize and raw and (not authorize_if_idle or subscribed_without_job(raw)):
             req = json.dumps({"id": 2, "method": "mining.authorize", "params": [authorize, "x"]}) + "\n"
             sock.sendall(req.encode())
             rec["authorize_sent"] = authorize
             mark = len(raw)
             closed_after = False
-            sock.settimeout(2)
+            # Wait for the answer and a job, a refusal, or the deadline: some servers take
+            # a few seconds to send the first job, and stopping at the first quiet moment
+            # read a slow pool as handing out no work.
             deadline = time.monotonic() + min(timeout, 8)
             while time.monotonic() < deadline and len(raw) < 131072:
+                sock.settimeout(max(0.1, deadline - time.monotonic()))
                 try:
                     chunk = sock.recv(4096)
                 except socket.timeout:
@@ -326,8 +355,17 @@ def probe(host, port, tls, timeout, ua, min_diff=None, authorize=None):
                     closed_after = True
                     break
                 raw += chunk
-                tail = raw[mark:]
-                if (b'"id":2' in tail or b'"id": 2' in tail) and tail.count(b"\n") >= 2:
+                msgs = []
+                for l in raw[mark:].decode("utf-8", "replace").split("\n"):
+                    try:
+                        m = json.loads(l)
+                    except Exception:
+                        continue
+                    if isinstance(m, dict):
+                        msgs.append(m)
+                reply = next((m for m in msgs if m.get("id") == 2), None)
+                job = any(m.get("method") == "mining.notify" for m in msgs)
+                if reply is not None and (job or reply.get("result") is not True):
                     break
             after = [l for l in raw[mark:].decode("utf-8", "replace").split("\n") if l.strip()]
             rec["authorize"] = authorize_facts(after, closed_after)

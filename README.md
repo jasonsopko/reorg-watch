@@ -280,7 +280,9 @@ scripts in `poolprobe/`:
 - `pool-survey.py` probes every listed endpoint and every endpoint the pages
   show that the list lacks: one Stratum v1 `mining.subscribe` for a stratum
   port, whose job is matched to this chain, and one real DATUM handshake
-  against the pool's published pubkey for a DATUM port. A pool's DATUM
+  against the pool's published pubkey for a DATUM port. A stratum port that
+  answers the subscribe without a job is also sent one `mining.authorize`
+  with a throwaway worker, since some servers send work only after that. A pool's DATUM
   service reads "verified" only when that handshake completed within the
   hour; "published, failing" when it did not, with the reason.
 - `datum-check.py` is the handshake itself: the signed, sealed hello a
@@ -291,8 +293,11 @@ scripts in `poolprobe/`:
   every hour.
 
 Rows are ordered by the path the probe found that hour, not by size. Pools
-with a DATUM service and no stratum port on file answering come first
-(largest first, since a larger pool pays more often). Pools with a DATUM
+with a DATUM service and no stratum port on file handing out work for this
+chain come first (largest first, since a larger pool pays more often). A
+port that answers a subscribe but gives the throwaway worker no job, such as
+a rental marketplace's door that serves registered rigs only, does not count
+as a stratum path. Pools with a DATUM
 service whose stratum ports also hand out work come next, smallest first:
 every block found through a stratum port is built by the pool's node, so
 the more of the network such a pool already finds, the more its stratum
@@ -324,9 +329,9 @@ ports still answer a subscribe and hand out work for this chain?), the
 DATUM service it publishes (does a real handshake verify it?), and the
 stratum ports the page lists (do they answer?). Ports a site calls closed
 are kept in the list with `"closed": true` so they keep being tested, and on
-those ports the probe also authorizes a throwaway worker (a random address
-with no key behind it) and watches whether the pool accepts it and keeps
-sending work. It never submits a share, so an answering port that takes a
+those ports, as on any port that answers without a job, the probe also
+authorizes a throwaway worker (a random address with no key behind it) and
+watches whether the pool accepts it and keeps sending work. It never submits a share, so an answering port that takes a
 worker proves the service is up and open, not that shares sent there are
 still paid, and the page says so.
 

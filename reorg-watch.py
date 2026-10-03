@@ -1104,8 +1104,8 @@ TIPS = {
     "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
     "choose_datum": "Whether the pool runs a DATUM service that your own DATUM gateway can connect to. Verified means this site completed a real DATUM handshake with the pool's published pubkey, the opening exchange a gateway makes, and closed the session; the time is when. Published, failing means the endpoint and key are on the pool's site but the last handshake failed, with the reason. No pubkey means the service cannot be verified, only the port checked. The fee is what the pool's site says, read on the date in pools.json.",
     "choose_sv1": "Public stratum v1 endpoints that answered a probe with work for this chain. Ports come from the pool's own pages, read every hour, as well as this site's list, so a port a page adds is probed the next hour. Closed means the pool's own site says the path is closed, whatever the port still answers. The fee is what the pool's site says, read on the date in pools.json.",
-    "survey_path": "The same reading as the Choosing a pool table: DATUM only when the pool has a DATUM service and no stratum port on file answered this hour; DATUM, also takes stratum when stratum ports answered too; stratum only when no DATUM service was found. The count is how many stratum ports answered a subscribe.",
-    "choose_claims": "What the pool's own pages claim, next to what this site's probe found, checked every hour: a path the site calls closed (do its ports still answer a subscribe and hand out work for this chain?), the DATUM service the site publishes (does a real handshake verify it?), and the stratum ports the page lists (do they answer?). Agrees and differs are the probe's reading of the pool's own words. On a port the site calls closed the probe also authorizes a throwaway worker and watches whether the pool accepts it and keeps sending work. That is as far as it goes: it never submits a share, so whether shares sent there are credited or paid is not measured.",
+    "survey_path": "The same reading as the Choosing a pool table: DATUM only when the pool has a DATUM service and no stratum port on file handed out work for this chain this hour; DATUM, also takes stratum when stratum ports handed out work too; stratum only when no DATUM service was found. A port that answers a subscribe but gives the probe no job, even after it authorizes a throwaway worker, does not count. The count is how many stratum ports handed out work.",
+    "choose_claims": "What the pool's own pages claim, next to what this site's probe found, checked every hour: a path the site calls closed (do its ports still answer a subscribe and hand out work for this chain?), the DATUM service the site publishes (does a real handshake verify it?), and the stratum ports the page lists (do they answer?). Agrees and differs are the probe's reading of the pool's own words. On a port the site calls closed, and on any port that answers a subscribe without a job, the probe also authorizes a throwaway worker and watches whether the pool accepts it and sends work. That is as far as it goes: it never submits a share, so whether shares sent there are credited or paid is not measured.",
     "choose_changes": "What pools changed lately: dated statements from their own pages, and what the chain shows. The chain part is measured from this site's coinbase index, day by day: when a pool's blocks switched between being built by its own stratum server and through DATUM gateways with the pool upstream, and when the number of coinbase outputs changed size class. A switch is reported once it has held for a full day. Gateway names are the distinct second coinbase tags seen in the pool's blocks that day.",
     "choose_paid": "Measured from this pool's last 20 coinbases, not taken from its site: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Held by the pool, paid later: one or two outputs with most of the value to one address. Paid in the coinbase: the miners, or the finder, are paid in the block itself.",
     "choose_trust_v1": "On a public stratum v1 port the pool's node always builds the block, so you hand it the choice of transactions. Whether it also holds your reward is the measured payout column.",
@@ -1544,9 +1544,9 @@ def render_survey(sd, E, tiers=None):
         x = tiers.get(r["label"])
         if x:
             tag_cls = {0: "ok", 1: "warn", 2: "bad", 3: "note"}[x["tier"]]
-            n_sv1 = len(x.get("sv1_answering") or [])
+            n_sv1 = len(x.get("sv1_work") or [])
             path = f'<span class="{tag_cls}">{E(x["tier_label"])}</span>' + (
-                f'<br><span class=note>{n_sv1} stratum port{"s" if n_sv1 != 1 else ""} answering</span>' if n_sv1 else "")
+                f'<br><span class=note>{n_sv1} stratum port{"s" if n_sv1 != 1 else ""} handing out work</span>' if n_sv1 else "")
         elif kind != "pool":
             path = '<span class=note>-</span>'
         else:
@@ -1576,17 +1576,19 @@ def render_survey(sd, E, tiers=None):
 <h2>What each pool runs</h2>
 <p class="note">Measured by connecting to each pool's own advertised endpoint and sending one
 Stratum v1 <span class=mono>mining.subscribe</span> with no credentials, then naming the server by
-matching its reply against each project's source code. Endpoints last probed {gen}. A pool may offer several
-protocols at once, so this records what an endpoint speaks, not how any particular block was built.
+matching its reply against each project's source code. A port that answers without a job is also sent
+one <span class=mono>mining.authorize</span> with a throwaway worker; no share is ever submitted.
+Endpoints last probed {gen}. A pool may offer several protocols at once, so this records what an
+endpoint speaks, not how any particular block was built.
 {omitted} smaller pools with no endpoint on file are not listed.{shared_note}</p>
 <div class="wrap"><table class="stack wide dense">
 <tr><th>Pool</th><th class=n>Share</th>{th("Path offered", "survey_path")}<th>Endpoints probed</th><th>Server software</th><th>DATUM</th>{th("Template built by", "builder")}<th>Coinbase payout</th><th>Consistency</th></tr>
 {rows}
 </table></div>
 <p class="note"><strong>Path offered</strong> is the same reading as the Choosing a pool table above: DATUM only
-when no stratum port on file answered this hour, otherwise which of the two paths the pool takes; a pool whose
-blocks are all built through DATUM gateways can still take stratum hashrate, because its own public gateways
-build blocks the same way a miner's does. <strong>Server software</strong> is named by matching the subscribe reply to the
+when no stratum port on file handed out work for this chain this hour, otherwise which of the two paths the
+pool takes; a pool whose blocks are all built through DATUM gateways can still take stratum hashrate,
+because its own public gateways build blocks the same way a miner's does. <strong>Server software</strong> is named by matching the subscribe reply to the
 source of datum_gateway, miningcore, node-stratum-pool, ckpool and public-pool; each of those
 writes a distinguishable reply. <strong>DATUM</strong> records what was found, and absence from a
 web page is not evidence that a service does not exist. <strong>Consistency</strong> compares a
@@ -1935,9 +1937,11 @@ def choose_rows(sd, week, week_total, canaries):
         pkey, paid, pdetail = payout_class(med, dom, "pool", own_from_survey(oc))
         custody = {"held": True, "finder": False, "coinbase": False, "elsewhere": False}.get(pkey)
         # A stratum port whose job was built on another chain is not a way to mine here,
-        # and one the pool's own site calls closed is not offered even while it answers.
+        # one that answers a subscribe but hands a new worker no job is not either, and one
+        # the pool's own site calls closed is not offered even while it answers.
         v1_all = [e for e in probed if e.get("verdict") == "stratum-v1"]
-        v1 = [e["endpoint"] for e in v1_all if e.get("chain") != "other" and not e.get("closed")]
+        v1 = [e["endpoint"] for e in v1_all if e.get("chain") == "this" and not e.get("closed")]
+        v1_no_work = [e["endpoint"] for e in v1_all if e.get("chain") not in ("this", "other") and not e.get("closed")]
         v1_listed = any(e.get("expect") == "stratum-v1" and not e.get("closed") for e in eps)
         dstat = r.get("datum") or ""
         dshort = next((short for k, short in DATUM_SHORT if dstat.startswith(k)), "not found")
@@ -1948,16 +1952,17 @@ def choose_rows(sd, week, week_total, canaries):
         d_eps = [{"endpoint": e["endpoint"], **{k: e["datum_check"].get(k) for k in ("result", "checked_at", "last_verified", "reply_ms")}}
                  for e in probed if e.get("datum_check")]
         site = r.get("site") or {}
-        # The path a pool offers, measured this hour: any stratum port on file (the pool's
-        # page or docs, closed or not) that answered a subscribe is a public stratum path,
-        # and one that handed out a job for this chain is a working one.
+        # The path a pool offers, measured this hour: a stratum port on file (the pool's page
+        # or docs, closed or not) that handed a job for this chain to the probe, with or
+        # without the throwaway worker, is a public stratum path. A port that only answers
+        # a subscribe (a marketplace door, a registered-rigs-only proxy) does not count.
         sv1_answering = [e["endpoint"] for e in v1_all]
         sv1_work = [e["endpoint"] for e in v1_all if e.get("chain") == "this"]
         # Tier credit for a DATUM service needs a published key and endpoint, or, with no
         # key to verify, a DATUM port that at least accepts a connection.
         datum_credit = dshort in ("yes, verified", "verified earlier, failing now", "published, handshake failing", "yes") \
             or (dshort == "endpoint published, no pubkey" and bool((check or {}).get("port_open")))
-        if datum_credit and not sv1_answering:
+        if datum_credit and not sv1_work:
             tier, tier_label = 0, "DATUM only"
         elif datum_credit:
             tier, tier_label = 1, "DATUM, also takes stratum"
@@ -1981,7 +1986,7 @@ def choose_rows(sd, week, week_total, canaries):
             "share_window_pct": oc.get("share_pct"), "class_mix": oc.get("class_mix"),
             "template_builder": oc.get("class_majority"),
             "payout": {"median_outputs": med, "dominant_script_pct": dom, "custody": custody, "class": pkey, "text": paid, "detail": pdetail},
-            "sv1": {"endpoints": v1, "listed": v1_listed, "fee": terms.get("sv1_fee", ""),
+            "sv1": {"endpoints": v1, "no_work": v1_no_work, "listed": v1_listed, "fee": terms.get("sv1_fee", ""),
                     "closed": r.get("sv1_closed"),
                     "other_chain": [e["endpoint"] for e in v1_all if e.get("chain") == "other"],
                     "closed_endpoints": [e["endpoint"] for e in v1_all if e.get("closed")],
@@ -2072,7 +2077,14 @@ def render_choose(rows, generated, changes, E):
             else:
                 note = "<br>" + tipped("site says closed", detail, "warn")
         if not s["endpoints"]:
-            base = '<span class=note>listed, not reachable</span>' if s["listed"] else '<span class=note>none found</span>'
+            if s.get("no_work"):
+                base = tipped("answers, hands out no work",
+                              ", ".join(s["no_work"]) + " answered a subscribe, but no job for this chain reached the "
+                              "probe, not even after it authorized a throwaway worker.", "note")
+            elif s["listed"]:
+                base = '<span class=note>listed, not reachable</span>'
+            else:
+                base = '<span class=note>none found</span>'
             return base + note
         out = "<br>".join(f'<span class=mono>{E(e)}</span>' for e in s["endpoints"][:2])
         if len(s["endpoints"]) > 2:
@@ -2154,7 +2166,7 @@ def render_choose(rows, generated, changes, E):
     tiers = {t: [x for x in rows if x["tier"] == t and (x["blocks_7d"] or t == 0)] for t in range(4)}
     parts = []
     if tiers[0]:
-        parts.append("<strong>DATUM only, no stratum port on file answering:</strong> "
+        parts.append("<strong>DATUM only, no stratum port on file handing out work:</strong> "
                      + ", ".join(name_pct(x) for x in tiers[0]) + ".")
     else:
         parts.append("<strong>No pool is DATUM-only this hour:</strong> every one with a DATUM service also has a stratum port handing out work.")
@@ -2167,7 +2179,7 @@ def render_choose(rows, generated, changes, E):
         parts.append("<strong>No public endpoint found, on the site or the chain:</strong> " + ", ".join(name_pct(x) for x in tiers[3]) + ".")
     blind = sum((x["share_7d_pct"] or 0) for x in tiers[1] + tiers[2])
     if blind:
-        parts.append(f"Pools with a stratum port answering found {blind:.0f}% of the last 7 days' blocks between them; how much of "
+        parts.append(f"Pools with a stratum port handing out work found {blind:.0f}% of the last 7 days' blocks between them; how much of "
                      "that came through their stratum ports is not visible from the chain, since a pool's own gateway builds a block "
                      "the same way a miner's does.")
     differs = [(x, [c for c in x.get("claims") or [] if c["agree"] is False]) for x in rows]
@@ -2190,9 +2202,12 @@ def render_choose(rows, generated, changes, E):
     for x in rows:
         name = f'<a href="{E(x["link"])}" rel="noopener">{E(x["pool"])}</a>' if x["link"] else E(x["pool"])
         tag_cls = {0: "ok", 1: "warn", 2: "bad", 3: "note"}[x["tier"]]
-        tag_tip = {0: "No stratum port on file answered this hour; the only way in is your own gateway.",
-                   1: "Has a DATUM service, and stratum ports on file also answered: " + ", ".join(x["sv1_answering"][:4])
-                      + (" and more" if len(x["sv1_answering"]) > 4 else "") + ". Every block found through those is built by the pool's node.",
+        idle = [e for e in x["sv1_answering"] if e not in x["sv1_work"]]
+        tag_tip = {0: "No stratum port on file handed out work for this chain this hour; the only way in is your own gateway."
+                      + (" " + ", ".join(idle[:4]) + (" and more" if len(idle) > 4 else "")
+                         + " answered a subscribe but gave the probe's throwaway worker no job." if idle else ""),
+                   1: "Has a DATUM service, and stratum ports on file also handed out work: " + ", ".join(x["sv1_work"][:4])
+                      + (" and more" if len(x["sv1_work"]) > 4 else "") + ". Every block found through those is built by the pool's node.",
                    2: "No DATUM service found; every block is built by the pool's node.",
                    3: "Nothing on the pool's site or docs to probe."}[x["tier"]]
         name += "<br>" + tipped(x["tier_label"], tag_tip, tag_cls)
@@ -2221,7 +2236,7 @@ pointing a miner at one of their stratum ports adds to that. The order here foll
 the pool's size: <span class=ok>DATUM only</span> pools first, largest first because a larger pool pays more often; then
 pools marked <span class=warn>DATUM, also takes stratum</span>, smallest first, because the more of the network a pool
 already finds, the more its stratum ports concentrate template building; <span class=bad>stratum only</span> pools last.
-A pool moves up the day its stratum ports stop answering. The same rows, with the tier, are published as
+A pool moves up the day its stratum ports stop handing out work. The same rows, with the tier, are published as
 <a href="pools.json">pools.json</a> for other sites to use.</p>
 <div class="wrap"><table class="stack wide dense">
 <tr>{th("Pool", "pool")}{th("Share, 7 days", "choose_share", "n")}{th("Blocks per day", "choose_bpd", "n")}{th("DATUM service", "choose_datum")}{th("Public sv1 port", "choose_sv1")}{th("Reward leaves the block", "choose_paid")}{th("On the sv1 port you hand the pool", "choose_trust_v1")}{th("With your own gateway you hand the pool", "choose_trust_gw")}{th("Site vs probe", "choose_claims")}{canary_th}</tr>
@@ -3004,7 +3019,7 @@ html.js section.tab {{ display: none; }}
                            "sv1": TIPS["choose_sv1"], "datum": TIPS["choose_datum"],
                            "trust_sv1_port": TIPS["choose_trust_v1"], "trust_own_gateway": TIPS["choose_trust_gw"],
                            "changes": TIPS["choose_changes"], "claims": TIPS["choose_claims"], "canary": TIPS["choose_canary"],
-                           "tier": "0 = DATUM only (a DATUM service, and no stratum port on file answered this hour); 1 = a DATUM service plus stratum ports that answer; 2 = stratum only; 3 = no endpoint found. Rows are ordered by tier, tier 1 smallest first.",
+                           "tier": "0 = DATUM only (a DATUM service, and no stratum port on file handed out work for this chain this hour); 1 = a DATUM service plus stratum ports that hand out work; 2 = stratum only; 3 = no endpoint found. A port that answers a subscribe but gives a throwaway worker no job does not count. Rows are ordered by tier, tier 1 smallest first.",
                            "terms": "What each pool's own site says, with the URL and the date it was read. Not verified."},
                 "changes": choose_changes,
                 "pools": choose}
