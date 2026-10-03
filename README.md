@@ -244,9 +244,10 @@ a branch that lost sits below the height it contested and dead-ends there
 with a cross. Long uncontested runs collapse so the contested parts sit
 together, and the most recent blocks are drawn one at a time, which is where
 a new fork shows up first. The newest block is on the left, so a block's
-parent is the column to its right. Every block links to its page on the
-explorer the watcher cross-checks against. A branch deeper than one block is drawn
-as a chain of its own: only its oldest block hangs off the common ancestor,
+parent is the column to its right. A block on the kept chain links to its
+page on cesspool.lol, by height; a block that lost has no page there or on
+the explorer, so it carries its hash on hover and no link. A branch
+deeper than one block is drawn as a chain of its own: only its oldest block hangs off the common ancestor,
 and only its tip carries the status badge and the cross.
 
 It needs `chain-tips.json` in the state directory, from a separate
