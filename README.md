@@ -138,8 +138,10 @@ On testnet4 add `--rest http://127.0.0.1:48332/rest --floor 150308`.
 
 ### The other scripts
 
-Everything reorg.watch runs is in this repository. The page sections that
-read a state file get it from these, each run from its own cron line:
+Everything reorg.watch runs is in this repository, apart from the node,
+which runs [Plumb](https://github.com/plumb-node/plumb) (Bitcoin Knots plus
+reviewed spam-policy filters). The page sections that read a state file get
+it from these, each run from its own cron line:
 
 ```
 * * * * *    $HOME/reorg-watch/forktips/chain-tips.py

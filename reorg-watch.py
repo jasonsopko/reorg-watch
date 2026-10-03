@@ -77,6 +77,7 @@ POOLS_REPO = "https://github.com/Kilombino/mempool-bip110"
 UA = "reorg-watch/1.1 (Bitcoin Knots node monitor)"
 REPO_URL = "https://github.com/jasonsopko/reorg-watch"
 NODE_REPO = "https://github.com/jasonsopko/knots-datum-node"
+PLUMB_URL = "https://github.com/plumb-node/plumb"
 # Early warnings for hashrate concentration. Each fires once per window per pool.
 SHARE_ALERT = 0.45        # one pool's share of the last 6 hours
 SHARE_MIN_BLOCKS = 40     # and at least this many blocks in those 6 hours
@@ -2601,6 +2602,7 @@ html {{ font-size: 17.5px; }}
 body {{ margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 Manjari, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
 a {{ color: var(--link); text-decoration: none; }} a:hover {{ text-decoration: underline; }}
 header {{ background: var(--band); color: var(--band-ink); }}
+header a {{ color: var(--band-ink); text-decoration: underline; text-decoration-color: var(--orange); }}
 .bar {{ max-width: 88rem; margin: 0 auto; padding: 1.4rem 1.25rem 1.1rem; display: flex; align-items: center; gap: 1rem; }}
 .mark {{ flex: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }}
 h1 {{ margin: 0; font: 700 1.55rem/1.15 "Martel Sans", Georgia, "Times New Roman", serif; letter-spacing: -.01em; }}
@@ -2731,7 +2733,7 @@ html.js section.tab {{ display: none; }}
 }})();
 </script>
 <header><div class="bar">{knot}<div><h1>Bitcoin Knots reorg watch</h1>
-<p class="sub">Chain reorganizations and pool shares on the BLAKE2b chain, from one Bitcoin Knots node. Generated {tt(now)}. Times are shown in your browser's time zone, <span class="tzname">{E(tsz(now, "%Z"))}</span> right now.</p></div></div></header>
+<p class="sub">Chain reorganizations and pool shares on the BLAKE2b chain, from one node running <a href="{PLUMB_URL}">Plumb</a>, Bitcoin Knots plus reviewed spam-policy filters. Generated {tt(now)}. Times are shown in your browser's time zone, <span class="tzname">{E(tsz(now, "%Z"))}</span> right now.</p></div></div></header>
 {nav}
 <main>
 <div id="stale" hidden></div>
@@ -2832,7 +2834,7 @@ html.js section.tab {{ display: none; }}
 </section>
 
 </main>
-<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. One node's view, cross-checked once a minute against {ex_link}, whose explorer also has the block-by-block detail. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.</footer>
+<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. The node runs <a href="{PLUMB_URL}">Plumb</a>; its filters change what it relays, not which blocks it accepts, so it follows the same chain as Knots. One node's view, cross-checked once a minute against {ex_link}, whose explorer also has the block-by-block detail. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.</footer>
 <script nonce="NONCE">
 (function () {{
   // Tabs. Without JavaScript every section is on the page in order; with it, one at a time,
