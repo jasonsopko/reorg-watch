@@ -364,19 +364,19 @@ text, for other sites to use.
 
 ### Reloading
 
-The page reloads when a block lands rather than on a timer. It prefers a
-WebSocket at `/ws`; failing that it polls `tip.json`, a small file written
-next to the page after each render, so it never advertises a tip the page
-does not yet show. A meta refresh at 600s covers readers without JavaScript.
+The page reloads when a block lands rather than on a timer. It polls
+`tip.json`, a small file written next to the page after each render, so it
+never advertises a tip the page does not yet show. A meta refresh at 600s
+covers readers without JavaScript.
 A red banner appears when the page is more than 15 minutes old, so a dead
 generator is visible to readers instead of silent.
 
 Serving the page behind a Content-Security-Policy needs `connect-src`.
 Without it `connect-src` falls back to `default-src` and the browser blocks
-fetch and WebSocket outright, with no visible error and no reloading:
+the poll outright, with no visible error and no reloading:
 
 ```
-connect-src 'self' wss://your.host;
+connect-src 'self';
 ```
 
 Both script tags carry `nonce="NONCE"`, a placeholder for a per-request
@@ -394,10 +394,6 @@ location / {
 
 Without the substitution the attribute is inert and `script-src
 'unsafe-inline'` works as before.
-
-The WebSocket is optional. Point `/ws` at a mempool backend on the same host
-if you run one. Without it the page polls and still reloads on a block, a few
-seconds later.
 
 ## How it decides
 

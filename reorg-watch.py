@@ -2950,17 +2950,15 @@ html.js section.tab {{ display: none; }}
 </script>
 <script nonce="NONCE">
 (function () {{
-  // Reload when a block is found, not on a timer. Two routes: a WebSocket pushed from the
-  // mempool instance on this host, and a poll of tip.json as the fallback. tip.json is
-  // written straight after the page, so a change there means new content is already there.
+  // Reload when a block is found, not on a timer: poll tip.json, which is written straight
+  // after the page, so a change there means new content is already there.
   var here = {tip_h};
   var done = false;
   function refresh(h) {{
-    if (done || !h || h <= here) return;   // only forward: mempool may lag the node briefly
+    if (done || !h || h <= here) return;   // only forward
     done = true;
-    // The socket can hear about a block before the page has been rebuilt. Wait until
-    // tip.json says the new height is on disk, or give up and reload anyway, rather than
-    // reloading onto the old page and bouncing again.
+    // Confirm the new height in tip.json (the page is written before it), or give up and
+    // reload anyway, rather than reloading onto the old page and bouncing again.
     // The reload goes to ?b=<height> so a CDN in front can serve one cached copy of the
     // new page to every viewer. A bare reload would fetch the cached OLD page, whose
     // script would hear the same block and reload again until that entry expired. The
@@ -2979,7 +2977,7 @@ html.js section.tab {{ display: none; }}
         .catch(function () {{ if (++tries > 8) go(h + "-" + Date.now()); else setTimeout(confirm, 1200); }});
     }})();
   }}
-  // --- fallback: poll the sidecar ---
+  // --- poll the sidecar ---
   var fails = 0, polling = false;
   function schedule() {{ setTimeout(poll, fails > 3 ? 60000 : 3000); }}
   function poll() {{
@@ -2990,23 +2988,7 @@ html.js section.tab {{ display: none; }}
       .catch(function () {{ fails++; schedule(); }});
   }}
   function startPolling() {{ if (!polling) {{ polling = true; schedule(); }} }}
-  // --- preferred: a block pushed over the socket ---
-  try {{
-    var ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-    var alive = setTimeout(startPolling, 8000);   // socket never opened; fall back
-    ws.onopen = function () {{ ws.send(JSON.stringify({{action: "want", data: ["blocks"]}})); }};
-    ws.onmessage = function (ev) {{
-      clearTimeout(alive);
-      try {{
-        var d = JSON.parse(ev.data), h = 0;
-        if (d.block && d.block.height) h = d.block.height;
-        else if (d.blocks && d.blocks.length) h = d.blocks[d.blocks.length - 1].height;
-        if (h) refresh(h);
-      }} catch (e) {{}}
-    }};
-    ws.onclose = startPolling;
-    ws.onerror = startPolling;
-  }} catch (e) {{ startPolling(); }}
+  startPolling();
 }})();
 </script>
 </body>
