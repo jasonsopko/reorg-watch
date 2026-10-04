@@ -2612,6 +2612,9 @@ header a {{ color: var(--band-ink); text-decoration: underline; text-decoration-
 h1 {{ margin: 0; font: 700 1.55rem/1.15 "Martel Sans", Georgia, "Times New Roman", serif; letter-spacing: -.01em; }}
 .sub {{ margin: .2rem 0 0; color: var(--band-sub); font-size: .95rem; }}
 main {{ max-width: 88rem; margin: 0 auto; padding: 0 1.25rem 3rem; }}
+footer {{ max-width: 88rem; margin: 0 auto; padding: 0 1.25rem 2.5rem; color: var(--mute); font-size: .9rem; }}
+.discord {{ display: flex; align-items: center; gap: .6rem; margin-top: .9rem; color: var(--ink); font-weight: 700; }}
+.discord img {{ width: 28px; height: 28px; border-radius: 50%; flex: none; }}
 h2 {{ font: 700 1.1rem/1.2 "Martel Sans", Georgia, "Times New Roman", serif; color: var(--green); margin: 2rem 0 .6rem; padding-bottom: .35rem; border-bottom: 2px solid var(--orange); }}
 .note, .muted {{ color: var(--mute); }} .note {{ font-size: .95rem; margin: 0 0 .7rem; }}
 .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; margin-top: 1.2rem; }}
@@ -2838,7 +2841,8 @@ html.js section.tab {{ display: none; }}
 </section>
 
 </main>
-<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. The node runs <a href="{PLUMB_URL}">Plumb</a>; its filters change what it relays, not which blocks it accepts, so it follows the same chain as Knots. One node's view, cross-checked once a minute against {ex_link}. Block links open on <a href="{BLOCK_PAGES}">{BLOCK_PAGES_NAME}</a>, which grades every block since the fork for spam. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.</footer>
+<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. The node runs <a href="{PLUMB_URL}">Plumb</a>; its filters change what it relays, not which blocks it accepts, so it follows the same chain as Knots. One node's view, cross-checked once a minute against {ex_link}. Block links open on <a href="{BLOCK_PAGES}">{BLOCK_PAGES_NAME}</a>, which grades every block since the fork for spam. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.
+<a class="discord" href="https://discord.gg/QxhQMdxrJ7"><img src="/beh-discord.png" width="28" height="28" alt=""><span>Bitcoin Education Hub on Discord: discuss Bitcoin openly, without being banned for your ideas.</span></a></footer>
 <script nonce="NONCE">
 (function () {{
   // Tabs. Without JavaScript every section is on the page in order; with it, one at a time,

@@ -373,10 +373,12 @@ generator is visible to readers instead of silent.
 
 Serving the page behind a Content-Security-Policy needs `connect-src`.
 Without it `connect-src` falls back to `default-src` and the browser blocks
-the poll outright, with no visible error and no reloading:
+the poll outright, with no visible error and no reloading. The footer shows
+the Bitcoin Education Hub's icon, `site/beh-discord.png`; copy it next to the
+page and allow images from the same origin:
 
 ```
-connect-src 'self';
+connect-src 'self'; img-src 'self';
 ```
 
 Both script tags carry `nonce="NONCE"`, a placeholder for a per-request
