@@ -564,15 +564,22 @@
       "link": "https://www.mining-dutch.nl/",
       "endpoints": [
         {
-          "host": "",
-          "port": 0,
-          "tls": false,
-          "expect": "unknown",
-          "source": ""
+          "url": "stratum+tcp://www.mining-dutch.nl:3407",
+          "expect": "stratum-v1",
+          "role": "public stratum, all payout schemes on one port",
+          "source": "https://www.mining-dutch.nl/pools/bitcoinknots.php?page=gettingstarted (read 2026-10-04)"
         }
       ],
-      "notes": "Multi-algorithm pool. The BLAKE2b connection details are rendered by client-side script, so no endpoint could be read from the page.",
-      "site_checked": "2026-09-12"
+      "notes": "Multi-algorithm MPOS pool; the BLAKE2b pool page is pools/bitcoinknots.php. Its getting-started page lists stratum+tcp://www.mining-dutch.nl:3407 with the account as username.worker; RouteHash's listing adds regional hosts europe/americas/asia/australia.mining-dutch.nl on the same port. All five were closed or refused from node1 on 2026-10-04, so the probe may keep reporting no answer while the pool keeps finding blocks.",
+      "site_checked": "2026-10-04",
+      "kind": "pool",
+      "terms": {
+        "sv1_fee": "PPS 1.5%, PROP 1%, PPLNS 1%, SOLO 0.5%",
+        "datum_fee": "no DATUM path on the site",
+        "payout": "not stated on the page checked; maturity shown as 6480 blocks",
+        "source": "https://www.mining-dutch.nl/pools/bitcoinknots.php?page=gettingstarted",
+        "checked": "2026-10-04"
+      }
     },
     {
       "label": "Catbus",
@@ -979,15 +986,29 @@
       "label": "xxxbtcb2",
       "kind": "pool",
       "link": "https://www.dxpool.com/",
-      "site_checked": "2026-09-29",
-      "notes": "DxPool: primary coinbase tag dxpool with gateway names as the secondary tag (xxxbtcb2, xywl5, dxgw); the explorer list names the label after the first gateway seen. Its site is script-rendered and shows no BLAKE2b endpoint or pubkey to a plain fetch, so nothing here can be probed.",
+      "site_checked": "2026-10-04",
+      "notes": "DxPool: primary coinbase tag dxpool with gateway names as the secondary tag (xxxbtcb2, xywl5, dxgw); the explorer list names the label after the first gateway seen. Its own site is script-rendered and shows no BLAKE2b endpoint or pubkey to a plain fetch. The endpoints here come from RouteHash's community listing (unclaimed there too), which names xbt.datum.dxpool.com:28915 as the DATUM host and xbt.public-gateway-01.dxpool.com as a public gateway at a 25% take; the gateway ports were found by probe 2026-10-04 (23334 hands out work for this chain, 3333 answers a subscribe with a different stratum implementation and hands out work for another chain). No pubkey anywhere, so the DATUM port can only be checked, not verified.",
       "endpoints": [
         {
-          "host": "",
-          "port": 0,
-          "tls": false,
-          "expect": "unknown",
-          "source": "https://www.dxpool.com/ (read 2026-09-29, script-rendered, no endpoint readable)"
+          "url": "stratum+tcp://xbt.datum.dxpool.com:28915",
+          "expect": "datum",
+          "role": "DATUM pool, named by RouteHash's listing, not by DxPool's own pages; no pubkey published",
+          "source": "app.routehash.com/api/pool/community (read 2026-10-04); not readable on https://www.dxpool.com/",
+          "unclaimed": true
+        },
+        {
+          "url": "stratum+tcp://xbt.public-gateway-01.dxpool.com:23334",
+          "expect": "stratum-v1",
+          "role": "public gateway stratum; hands out work for this chain (probe 2026-10-04)",
+          "source": "host from app.routehash.com/api/pool/community (read 2026-10-04); port found by probe 2026-10-04",
+          "unclaimed": true
+        },
+        {
+          "url": "stratum+tcp://xbt.public-gateway-01.dxpool.com:3333",
+          "expect": "stratum-v1",
+          "role": "answers a subscribe and hands out work for another chain (probe 2026-10-04)",
+          "source": "host from app.routehash.com/api/pool/community (read 2026-10-04); port found by probe 2026-10-04",
+          "unclaimed": true
         }
       ]
     },
@@ -1026,6 +1047,60 @@
       ]
     },
     {
+      "label": "PaperclipPool",
+      "kind": "pool",
+      "link": "https://pool.paperclippool.xyz/",
+      "site_checked": "2026-10-04",
+      "notes": "DATUM pool with a public stratum port. Its /api/status publishes the pubkey, ports and fee split (stratum_fee_bps 300, datum_bonus_bps 200, direct_datum_fee_bps 0, window_multiple 8). Coinbase tag PaperclipPool; first block 971713. Listed on RouteHash's community page as an unclaimed entry. DATUM handshake verified 2026-10-04.",
+      "terms": {
+        "sv1_fee": "3% on the public stratum port, 2 points of it credited to DATUM work",
+        "datum_fee": "0%",
+        "payout": "paid in the coinbase, TIDES over 8 network difficulties",
+        "source": "https://pool.paperclippool.xyz/ and /api/status",
+        "checked": "2026-10-04"
+      },
+      "datum_documented": true,
+      "datum_pubkey": "eb9c7885044ca6dc7a4af3761cb739cbf88e88f6852e6c4b4f754710ec0cc8c9fb4a78cb35bbfe6ac4ec83feb0030e5e8ac065baf87d9ab21489011f3d865478",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://pool.paperclippool.xyz:28915",
+          "expect": "datum",
+          "role": "DATUM pool",
+          "source": "https://pool.paperclippool.xyz/ (read 2026-10-04); pubkey and port from /api/status"
+        },
+        {
+          "url": "stratum+tcp://pool.paperclippool.xyz:3333",
+          "expect": "stratum-v1",
+          "role": "public stratum",
+          "source": "https://pool.paperclippool.xyz/ (read 2026-10-04)"
+        }
+      ]
+    },
+    {
+      "label": "Blockvase",
+      "kind": "pool",
+      "link": "https://blockvase.com/",
+      "site_checked": "2026-10-04",
+      "notes": "DATUM-only pool run by the maker of the Blockvase node-and-miner device, on its own c_datum_prime (source linked from the handshake banner). blockvase.com/api/pool publishes the endpoint, pubkey, fee (0 bps until the first block, 21 bps after; fee_after_first_block true) and stratum_v1_offered false. Attributed on chain by address (Kilombino lists two). The 84%-of-hash DATUM client in its miner list is probably the operator's own miner, so no own_addresses recorded. Listed on RouteHash's community page as an unclaimed entry. DATUM handshake verified 2026-10-04.",
+      "terms": {
+        "sv1_fee": "no stratum path (stratum_v1_offered false)",
+        "datum_fee": "0% until the pool's first block, 0.21% since",
+        "payout": "paid in the coinbase, rolling share window of 8 network difficulties, up to 128 outputs",
+        "source": "https://blockvase.com/api/pool",
+        "checked": "2026-10-04"
+      },
+      "datum_documented": true,
+      "datum_pubkey": "d89f714cfe7bd9022794b42e2b9b7c196cdd0e16165df0300d788a1b18a86da20654de460ece16e2a2e88d1f8ad316f728c2b5b731d259afd55229375c905439",
+      "endpoints": [
+        {
+          "url": "stratum+tcp://pool.blockvase.com:28915",
+          "expect": "datum",
+          "role": "DATUM pool",
+          "source": "https://blockvase.com/api/pool datum_host/datum_port (read 2026-10-04)"
+        }
+      ]
+    },
+    {
       "label": "RouteHash",
       "kind": "pool",
       "link": "https://app.routehash.com/",
@@ -1051,6 +1126,18 @@
     }
   ],
   "changes": [
+    {
+      "date": "2026-10-04",
+      "pool": "PaperclipPool",
+      "text": "Added here. DATUM pool with a public stratum port: 0% on DATUM, 3% on stratum with 2 points of that credited to DATUM work, TIDES over 8 network difficulties paid in the coinbase. First block 971713.",
+      "source": "https://pool.paperclippool.xyz/ and /api/status (read 2026-10-04)"
+    },
+    {
+      "date": "2026-10-04",
+      "pool": "Blockvase",
+      "text": "Added here. DATUM-only pool run by the maker of the Blockvase node-and-miner device: 0% until its first block, 0.21% since, rolling share window of 8 network difficulties paid in the coinbase. No stratum port.",
+      "source": "https://blockvase.com/api/pool (read 2026-10-04)"
+    },
     {
       "date": "2026-10-01",
       "pool": "RouteHash",
