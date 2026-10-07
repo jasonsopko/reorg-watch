@@ -2287,13 +2287,13 @@ def node_tab_html(ranked, day_n):
 <p>It is more work than typing a pool's address into your miner. The difference is who decides what your hashpower builds. If everyone who can run a node does, the chain does not depend on a few operators behaving well.</p>
 
 <h2>Get started</h2>
-<p><a href="{NODE_REPO}">knots-datum-node</a> sets up a DATUM gateway and, if you need one, a Bitcoin Knots node on your own Linux computer. It asks a few plain questions, runs without root after a short administrator setup, shows everything it would do with <code>--dry-run</code> before it changes anything, and gives you a dashboard to see your miners. It is free and open source (MIT).</p>
+<p><a href="{NODE_REPO}">knots-datum-node</a> sets up a DATUM gateway and, if you need one, a node on your own Linux computer. The node is <a href="{PLUMB_URL}">Plumb</a>, Bitcoin Knots plus reviewed spam-policy filters, unless you pick Knots as released (ARM computers get Knots for now). It asks a few plain questions, runs without root after a short administrator setup, shows everything it would do with <code>--dry-run</code> before it changes anything, and gives you a dashboard to see your miners. It is free and open source (MIT).</p>
 <ul class="how">
 <li><strong>You bought an ASIC and it is at home:</strong> run it on a computer at home, and point your miner at that computer over your home network.</li>
 <li><strong>You rent hashpower:</strong> run it on a rented server the rental service can reach. Check that the provider allows it first; the README has notes on that.</li>
 <li><strong>You already run a Bitcoin Knots node</strong>, such as an Umbrel, a Start9 or a Knots box: it can use that node and skip the download.</li>
 </ul>
-<p>New to running a node? <a href="/start/">Mine with your own node</a> explains it in plain terms. Then the <a href="{NODE_REPO}#readme">README on GitHub</a> walks through every step. Every commit is signed, the script checks the Knots release signature, and it builds the gateway from one fixed commit. Read it before you run it.</p>
+<p>New to running a node? <a href="/start/">Mine with your own node</a> explains it in plain terms. Then the <a href="{NODE_REPO}#readme">README on GitHub</a> walks through every step. Every commit is signed, the script checks the signature on the node release it downloads, and it builds the gateway from one fixed commit. Read it before you run it.</p>
 
 <h2>Pool or solo</h2>
 <p>With a DATUM pool you get a share of every block the pool finds, split by your share of recent work. Solo pays you the whole reward for any block you find, and nothing otherwise. The installer defaults to CONVOY because it is the DATUM pool running on this chain today. Any DATUM pool works, and this site does not endorse one; <a href="#choose">Choosing a pool</a> shows how each pool's blocks are built and paid.</p>
