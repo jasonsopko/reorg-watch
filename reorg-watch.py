@@ -2841,7 +2841,7 @@ html.js section.tab {{ display: none; }}
 </section>
 
 </main>
-<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. The node runs <a href="{PLUMB_URL}">Plumb</a>; its filters change what it relays, not which blocks it accepts, so it follows the same chain as Knots. One node's view, cross-checked once a minute against {ex_link}. Block links open on <a href="{BLOCK_PAGES}">{BLOCK_PAGES_NAME}</a>, which grades every block since the fork for spam. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate.
+<footer>Produced by <a href="{REPO_URL}">reorg-watch</a>, an independent monitor. Not affiliated with the Bitcoin Knots project. The node runs <a href="{PLUMB_URL}">Plumb</a>; its filters change what it relays, not which blocks it accepts, so it follows the same chain as Knots. One node's view, cross-checked once a minute against {ex_link}. Block links open on <a href="{BLOCK_PAGES}">{BLOCK_PAGES_NAME}</a>, which grades every block since the fork for spam. Pool names from <a href="{POOLS_REPO}">Kilombino's pool list</a>. Reorgs are detected to a depth of {win} blocks, about {wspan} hours at the current rate. <a href="/privacy/">What this site logs</a>.
 <a class="discord" href="https://discord.gg/QxhQMdxrJ7"><img src="/beh-discord.png" width="28" height="28" alt=""><span>Bitcoin Education Hub on Discord: discuss Bitcoin openly, without being banned for your ideas.</span></a></footer>
 <script nonce="NONCE">
 (function () {{

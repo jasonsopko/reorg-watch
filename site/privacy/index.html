@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy</title>
+<meta name="description" content="What reorg.watch records when you visit, and how long it keeps it.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="reorg.watch">
+<meta property="og:title" content="Privacy">
+<meta property="og:description" content="What reorg.watch records when you visit, and how long it keeps it.">
+<meta property="og:url" content="https://reorg.watch/privacy/">
+<meta property="og:image" content="https://reorg.watch/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Privacy">
+<meta name="twitter:description" content="What reorg.watch records when you visit, and how long it keeps it.">
+<meta name="twitter:image" content="https://reorg.watch/og.png">
+<style>
+:root {
+  color-scheme: light dark;
+  --ink: #171717; --paper: #f6f3ee; --card: #ffffff; --rule: #dcd5c8; --mute: #6b675f;
+  --orange: #f7931a; --green: #2d4b25; --band: #2d4b25; --band-ink: #ffffff; --band-sub: #d9e3d3; --link: #2d4b25;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --ink: #f2f2f2; --paper: #171717; --card: #222222; --rule: #3a3a3a; --mute: #a09a90;
+  --green: #9ccc65; --band: #1f3519; --band-ink: #f2f2f2; --band-sub: #b7c7ad; --link: #9ccc65;
+} }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 Manjari, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+header { background: var(--band); color: var(--band-ink); }
+.bar, main, footer { max-width: 44rem; margin: 0 auto; padding-left: 1rem; padding-right: 1rem; }
+.bar { padding-top: 1.6rem; padding-bottom: 1.3rem; }
+h1 { margin: 0; font: 700 1.7rem/1.2 "Martel Sans", Georgia, "Times New Roman", serif; }
+.sub { margin: .35rem 0 0; color: var(--band-sub); }
+.lead { font-size: 1.15rem; margin: 1.6rem 0 0; }
+h2 { font: 700 1.15rem/1.25 "Martel Sans", Georgia, "Times New Roman", serif; color: var(--green); margin: 2.2rem 0 .6rem; padding-bottom: .35rem; border-bottom: 2px solid var(--orange); }
+ul { padding-left: 1.2rem; } li { margin: .35rem 0; }
+dl { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .8rem 1rem; margin: 1.4rem 0 0; }
+dt { font-weight: 700; margin-top: .5rem; } dt:first-child { margin-top: 0; } dd { margin: 0; }
+.setups { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+.setup { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: .8rem 1rem; }
+.setup strong { display: block; color: var(--green); }
+.note { color: var(--mute); font-size: .95rem; }
+footer { color: var(--mute); font-size: .9rem; padding-top: 2rem; padding-bottom: 3rem; border-top: 1px solid var(--rule); margin-top: 2.5rem; }
+.discord { display: flex; align-items: center; gap: .6rem; color: var(--ink); font-weight: 700; text-decoration: none; }
+.discord img { width: 28px; height: 28px; border-radius: 50%; flex: none; }
+</style>
+</head>
+<body>
+<header><div class="bar">
+<h1>Privacy</h1>
+<p class="sub">What this site records when you visit, and how long it keeps it.</p>
+</div></header>
+<main>
+
+<h2>The server log</h2>
+<p>Every request that reaches our server goes into its access log with:</p>
+<ul>
+<li>your IP address</li>
+<li>the date and time</li>
+<li>the address you asked for</li>
+<li>the page that linked you here, if your browser sends it</li>
+<li>your browser's user agent string</li>
+</ul>
+<p>A request that fails can also go into the error log, with your IP address, the address you asked for and the page that linked you there.</p>
+<p>The access log is deleted after at most 15 days. The error log is cleared out the same way, but only on days that had errors, so its entries can stay longer. We open the logs only to look into problems with the site. We run no analytics on them, and we do not share or sell them.</p>
+
+<h2>An open page checks in</h2>
+<p>While the <a href="/">main page</a> is open, it asks the server for the latest block every 3 to 4 seconds so it can reload when a block is found, and it reloads anyway after 10 minutes without one. When it opens, and every 5 minutes after that, it also fetches itself again to warn you if what you are reading is out of date. Each of those requests is logged with your IP address when it reaches our server.</p>
+
+<h2>Cloudflare</h2>
+<p>Requests to reorg.watch go through Cloudflare first. Cloudflare:</p>
+<ul><li>sees your IP address and what you asked for</li>
+<li>adds its Web Analytics script to every page; the script loads from static.cloudflareinsights.com and reports which page you opened, the page that linked you there, your browser and operating system, how long the page took to load, and how quickly it responded when you clicked or typed, including which part of the page you used</li>
+<li>asks your browser to report requests that fail</li>
+<li>can set its own cookies, for example when it checks whether a visitor is a bot</li>
+<li>shows us some of what it records in its dashboard, which can include IP addresses</li></ul>
+<p><a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a> covers what it keeps.</p>
+
+<h2>Everything else</h2>
+<ul>
+<li>This site sets no cookies, and its own code runs no analytics. It has no accounts or ads.</li>
+<li>Apart from Cloudflare's analytics script, every script and image comes from reorg.watch.</li>
+<li>Your browser remembers which window the Pool share tab shows, the default or the one you picked. It is not sent to us.</li>
+<li>Links to other sites leave this one, and those sites have their own policies. Your browser tells them only that you came from reorg.watch, not which page.</li>
+</ul>
+
+<h2>Questions</h2>
+<p>Open an issue on <a href="https://github.com/jasonsopko/reorg-watch/issues">the site's GitHub repository</a>, where the source of the page generator also lives. If the logging changes, this page changes with it.</p>
+<p class="note">Updated 8 October 2026.</p>
+
+</main>
+<footer>
+<p>reorg.watch is an independent monitor, not affiliated with the Bitcoin Knots project. Source: <a href="https://github.com/jasonsopko/reorg-watch">reorg-watch</a>. <a href="/privacy/">What this site logs</a>.</p>
+<p><a class="discord" href="https://discord.gg/QxhQMdxrJ7"><img src="/beh-discord.png" width="28" height="28" alt=""><span>Bitcoin Education Hub on Discord: discuss Bitcoin openly, without being banned for your ideas.</span></a></p>
+</footer>
+</body>
+</html>
