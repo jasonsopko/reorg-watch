@@ -1079,7 +1079,7 @@ TIPS = {
     "recent_blocks": "Each card is one block: height, pool, transaction count, total reward, and how long ago it arrived. Colour is the pool, matching the share ring; a block from a pool outside the day's top seven is grey. Age counts up from the block's header time by your device clock.",
     "hour": "Hour by block header time, labeled in your browser's time zone (the server's zone without JavaScript). Buckets are whole hours. The current hour is still filling.",
     "hourshare": "This pool's share of that hour's blocks. The three columns are the three largest pools of the day. Cells at or above half are marked.",
-    "blocks_fork": "All blocks this label has mined since the BLAKE2b fork block.",
+    "blocks_fork": "All blocks this label has mined since the fork at height 961640.",
     "payout": "How the reward leaves this label's blocks, read from its last 20 coinbases, so a pool that changes how it pays shows up within a day or two: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Paid in the coinbase to one address, not the pool's: one or two outputs with most of the value to an address that is not one of the pool's known addresses, while the pool's own address takes a small share such as its fee. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
     "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC. For a pool that pays its miners in the coinbase, most of this went straight to the miners; hover the number for the split.",
     "matured": "The pool's own rewards that are spendable now. Its miners' shares paid in the coinbase are not counted here, or in Moved and Held. Mined at least 100 blocks ago, Mined at least 100 blocks ago, except that coinbases from block 973440 stay locked until block 979920 (about 45 days) under Knots 29.4.2, and count as matured only from there.",
@@ -1098,7 +1098,7 @@ TIPS = {
     "outputs": "Value-bearing outputs of the coinbase transaction.",
     "reward": "Total value of the coinbase outputs: subsidy plus fees.",
     "fees": "Reward minus the subsidy for that height.",
-    "hdr": "Read from the 164-byte header. Every BLAKE2b block has three nonce fields: nonce is the ASIC's 32-bit nonce, nonce2 the gateway's second nonce, nonce3 the Sia time slot, which Sia-protocol ASICs fill with the timestamp ('time in slot 3'); software that leaves it zero is not driving a Sia-protocol miner. Profile is the low two bits of the flags byte and picks one of four header layouts; every block so far is profile 0. 'Time roll allowed' is flag bit 4, set by a gateway configured to let the hasher roll the timestamp, with the real time recovered from the offset. An offset without the flag is ignored by the node for timekeeping and acts as extra nonce space; 'time in offset field' marks software that writes the timestamp there instead of slot 3. 'xor key' means the miner used the header's xor mask.",
+    "hdr": "Read from the 164-byte header. Every block since the fork has three nonce fields: nonce is the ASIC's 32-bit nonce, nonce2 the gateway's second nonce, nonce3 the Sia time slot, which Sia-protocol ASICs fill with the timestamp ('time in slot 3'); software that leaves it zero is not driving a Sia-protocol miner. Profile is the low two bits of the flags byte and picks one of four header layouts; every block so far is profile 0. 'Time roll allowed' is flag bit 4, set by a gateway configured to let the hasher roll the timestamp, with the real time recovered from the offset. An offset without the flag is ignored by the node for timekeeping and acts as extra nonce space; 'time in offset field' marks software that writes the timestamp there instead of slot 3. 'xor key' means the miner used the header's xor mask.",
     "mv_pool": "Labels of the coinbases this transaction spent, with the BTC from each.",
     "mv_btc": "Total coinbase value this transaction spent.",
     "mv_in": "Number of coinbase outputs consumed.",
@@ -1133,6 +1133,15 @@ CLASS_TIPS = {
 KIND_TIPS = {"payout": "3 or more outputs: rewards distributed to miners.",
              "sweep": "Several rewards gathered into 1 or 2 outputs.",
              "transfer": "One reward moved to 1 or 2 outputs."}
+
+
+ALGO_PATH = re.compile(r"https?://([^/\s]+)/[^\s,;)]*blake2b[^\s,;)]*", re.I)
+
+
+def shown_source(text):
+    """A source note as the page shows it: a URL whose path names the hash algorithm is shown as
+    its host alone, since the page calls the chain Bitcoin. Links (href) keep the full URL."""
+    return ALGO_PATH.sub(r"\1", text)
 
 
 def tipped(label, tip, cls=""):
@@ -2040,7 +2049,7 @@ def render_changes(rows, changes, E):
     for c in sorted(changes, key=lambda c: c.get("date", ""), reverse=True):
         line = f'<strong>{E(c.get("date", ""))} {E(c.get("pool", ""))}.</strong> {E(c.get("text", ""))}'
         if c.get("source"):
-            line += f' <span class=note>({E(c["source"])})</span>'
+            line += f' <span class=note>({E(shown_source(c["source"]))})</span>'
         oc = onchain.pop(c.get("pool"), None)
         if oc:
             line += f' On chain: {chain_text(oc)}.'
@@ -2070,8 +2079,8 @@ def render_choose(rows, generated, changes, E):
         note = ""
         if closed:
             cl = next((c for c in x["claims"] if c["kind"] == "closure"), None)
-            detail = (cl["claim"] + "; " + cl["found"] + ". " + str(closed.get("source", ""))) if cl else \
-                (str(closed.get("what", "")) + ", " + str(closed.get("date", "")) + ". " + str(closed.get("source", "")))
+            detail = (cl["claim"] + "; " + cl["found"] + ". " + shown_source(str(closed.get("source", "")))) if cl else \
+                (str(closed.get("what", "")) + ", " + str(closed.get("date", "")) + ". " + shown_source(str(closed.get("source", ""))))
             if cl and cl["agree"] is False:
                 note = "<br>" + tipped("site says closed, port still answers", detail, "warn")
             elif cl and cl["agree"]:
@@ -2145,7 +2154,7 @@ def render_choose(rows, generated, changes, E):
         for c in cs:
             t = iso_t(c.get("checked_at") or "")
             detail = c["claim"] + ": " + c["found"] + "." + (" Checked " + tsz(t, "%Y-%m-%d %H:%M %Z") + "." if t else "") \
-                + (" Source: " + c["source"] + "." if c.get("source") else "")
+                + (" Source: " + shown_source(c["source"]) + "." if c.get("source") else "")
             head = {"closure": "closure", "datum": "DATUM service", "ports": "listed ports"}[c["kind"]]
             if c["agree"] is None:
                 parts.append(tipped(head + ": not testable", detail, "note"))
@@ -2572,18 +2581,18 @@ def render_html(path, sd, st):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="600">
 <title>Bitcoin Knots reorg watch</title>
-<meta name="description" content="Chain reorganizations, pool shares and block rewards on Bitcoin's BLAKE2b chain, measured from one Bitcoin Knots node. An independent monitor.">
+<meta name="description" content="Chain reorganizations, pool shares and block rewards on Bitcoin, measured from one Bitcoin Knots node. An independent monitor.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="reorg.watch">
 <meta property="og:title" content="Bitcoin Knots reorg watch">
-<meta property="og:description" content="Chain reorganizations, pool shares and block rewards on Bitcoin's BLAKE2b chain, measured from one Bitcoin Knots node.">
+<meta property="og:description" content="Chain reorganizations, pool shares and block rewards on Bitcoin, measured from one Bitcoin Knots node.">
 <meta property="og:url" content="https://reorg.watch/">
 <meta property="og:image" content="https://reorg.watch/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Bitcoin Knots reorg watch">
-<meta name="twitter:description" content="Chain reorganizations, pool shares and block rewards on Bitcoin's BLAKE2b chain, measured from one Bitcoin Knots node.">
+<meta name="twitter:description" content="Chain reorganizations, pool shares and block rewards on Bitcoin, measured from one Bitcoin Knots node.">
 <meta name="twitter:image" content="https://reorg.watch/og.png">
 <style>
 html {{ font-size: 17.5px; }}
@@ -2740,7 +2749,7 @@ html.js section.tab {{ display: none; }}
 }})();
 </script>
 <header><div class="bar">{knot}<div><h1>Bitcoin Knots reorg watch</h1>
-<p class="sub">Chain reorganizations and pool shares on the BLAKE2b chain, from one node running <a href="{PLUMB_URL}">Plumb</a>, Bitcoin Knots plus reviewed spam-policy filters. Generated {tt(now)}. Times are shown in your browser's time zone, <span class="tzname">{E(tsz(now, "%Z"))}</span> right now.</p></div></div></header>
+<p class="sub">Chain reorganizations and pool shares on Bitcoin, from one node running <a href="{PLUMB_URL}">Plumb</a>, Bitcoin Knots plus reviewed spam-policy filters. Generated {tt(now)}. Times are shown in your browser's time zone, <span class="tzname">{E(tsz(now, "%Z"))}</span> right now.</p></div></div></header>
 {nav}
 <main>
 <div id="stale" hidden></div>
