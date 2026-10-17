@@ -187,10 +187,12 @@ def classify(lines, raw, opened, err):
     facts, msgs, saw_json = {}, [], False
     for ln in lines:
         try:
-            msgs.append(json.loads(ln))
-            saw_json = True
+            msg = json.loads(ln)
         except Exception:
             continue
+        if isinstance(msg, dict):          # an HTTP body of "404" parses as the number 404
+            msgs.append(msg)
+            saw_json = True
 
     verdict = None
     for msg in msgs:                                  # the mining.configure reply, if we sent one
@@ -256,6 +258,8 @@ def authorize_facts(lines, closed):
         try:
             msg = json.loads(ln)
         except Exception:
+            continue
+        if not isinstance(msg, dict):
             continue
         if msg.get("id") == 2:
             out["result"] = msg.get("result")
