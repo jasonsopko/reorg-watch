@@ -752,13 +752,37 @@
           "source": "https://b2pool.io/ (read 2026-09-29)"
         },
         {
+          "url": "stratum+tcp://hel.b2pool.io:3333",
+          "expect": "stratum-v1",
+          "role": "pool stratum, ASIC, Helsinki",
+          "source": "https://b2pool.io/start (read 2026-10-17)"
+        },
+        {
+          "url": "stratum+tcp://lax.b2pool.io:3333",
+          "expect": "stratum-v1",
+          "role": "pool stratum, ASIC, Los Angeles",
+          "source": "https://b2pool.io/start (read 2026-10-17)"
+        },
+        {
+          "url": "stratum+tcp://ua.b2pool.io:3333",
+          "expect": "stratum-v1",
+          "role": "pool stratum, ASIC, Kyiv",
+          "source": "https://b2pool.io/start (read 2026-10-17)"
+        },
+        {
+          "url": "stratum+tcp://hkg.b2pool.io:3333",
+          "expect": "stratum-v1",
+          "role": "pool stratum, ASIC, Hong Kong",
+          "source": "https://b2pool.io/start (read 2026-10-17)"
+        },
+        {
           "url": "stratum2+tcp://de.b2pool.io:13333",
           "expect": "stratum-v2",
           "role": "pool stratum v2",
           "source": "https://b2pool.io/start (read 2026-09-29)"
         }
       ],
-      "notes": "Offers stratum v1 (ASIC 3333, FPGA/GPU 4444, CPU 5555, solo 3334), pool-run DATUM gateways on 23333/24444/25555, DATUM on 28915 and Stratum V2 on 13333, in de/hel/ord/lax/ua regions. Its site asks for gateway 0.1.23 or the C gateway from 40cf813 on, which is the version 3 handshake.",
+      "notes": "Offers stratum v1 (ASIC 3333, FPGA/GPU 4444, CPU 5555, solo 3334), pool-run DATUM gateways on 23333/24444/25555, DATUM on 28915 and Stratum V2 on 13333, in de/hel/ord/lax/ua/hkg regions. Its site asks for gateway 0.1.23 or the C gateway from 40cf813 on, which is the version 3 handshake.",
       "datum_pubkey": "8ba1f7693d117620b1e5a46828f1cd187efe81114e9cee6a063bfbbe2f1b6cff0fc681d3c1ca7cb19c0e0dbddfbea65d5509e974e7f0000112dd07cba744a716",
       "site_checked": "2026-09-29",
       "terms": {
