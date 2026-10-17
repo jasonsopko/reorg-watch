@@ -48,7 +48,11 @@ except OSError:
     MAILTO = ""
 UA = "Mozilla/5.0 (compatible; reorg.watch pool-site-watch; +https://reorg.watch)"
 
-HOSTPORT = re.compile(r"(?<![\w.-])((?:[a-z0-9-]+\.)+[a-z]{2,})(?::|&#58;|\s*port\s*)(\d{2,5})(?!\d)", re.I)
+HOSTPORT = re.compile(r"(?<![\w.-])((?:[a-z0-9-]{1,63}\.){1,10}[a-z]{2,24})(?:\s{0,3}(?::|&#58;)\s{0,3}|\s{0,3}port\s{0,3})(\d{2,5})(?!\d)", re.I)
+# Some pages put the port in a tag of its own (B2Pool: host:<span data-port>3333</span>),
+# so HOSTPORT also runs on the text with every tag turned into a space. [^<>] keeps a
+# page full of unclosed '<' from costing a rescan per character.
+TAG = re.compile(r"<[^<>]*>")
 PUBKEY = re.compile(r"(?<![0-9a-f])[0-9a-f]{128}(?![0-9a-f])", re.I)
 # A gateway config printed on the page: "pool_host": "host", "pool_port": 28915 (quotes may be &quot;)
 CONFHOST = re.compile(r"pool_host(?:&quot;|\")?\s*:\s*(?:&quot;|\")?\s*((?:[a-z0-9-]+\.)+[a-z]{2,})\s*(?:&quot;|\")?\s*,\s*(?:&quot;|\")?pool_port(?:&quot;|\")?\s*:\s*(\d{2,5})", re.I)
@@ -138,7 +142,7 @@ def site_findings(pools, feed):
             if unverified:
                 insecure.append(url)
             own = urlsplit(final)
-            for host, port in HOSTPORT.findall(text) + CONFHOST.findall(text):
+            for host, port in HOSTPORT.findall(text) + HOSTPORT.findall(TAG.sub(" ", text)) + CONFHOST.findall(text):
                 host = host.lower()
                 if port in WEB_PORTS or port in OTHER_PORTS or (host == (own.hostname or "") and port == str(own.port or "")):
                     continue
