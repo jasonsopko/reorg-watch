@@ -24,6 +24,11 @@ does two things with what it finds:
        and listed labels with no blocks in the last two weeks
      - probe: an endpoint whose survey verdict changed and stayed changed for
        two runs in a row (one bad connect is not news)
+     - outside: BLAKE2b hashrate that could move to this chain without new
+       machines (the list's "blake2b_watch"): a new BLAKE2b coin or Siacoin
+       pool on miningpoolstats, a name like xbt.<domain> appearing on a
+       Siacoin pool's domain (checked once a day), or a Siacoin pool's port
+       handing out work for this chain (probed every run)
 
 Findings go to ~/.reorg-watch/site-watch.txt every run. Mail goes out only
 when the findings differ from the last mailed set, with counts ignored, so an
@@ -32,7 +37,7 @@ unfixed item is reported once, not once an hour.
 Usage: pool-site-watch.py [--no-mail] [--print]
 """
 
-import argparse, json, os, re, ssl, subprocess, sys, urllib.request
+import argparse, importlib.util, json, os, re, secrets, socket, ssl, subprocess, sys, urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -66,10 +71,20 @@ QUIET_BLOCKS = 2016      # two weeks: a listed label with nothing here may be re
 MIN_UNLISTED = 3
 FORGET_DAYS = 30         # a page endpoint unseen this long is dropped from the feed
 THIRD_PARTY_MAX = 20     # endpoints taken from one page for other pools; the rest are reported, not probed
+WATCH_EVERY_H = 23       # the coin list, the Siacoin page and the DNS names: about once a day
+WATCH_MAX_DOMAINS = 12
+MPS_DATA = "https://data.miningpoolstats.stream/data/%s.js?t=%s"
 
 
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def fetch(url):
@@ -335,11 +350,104 @@ def probe_findings(state):
     return out
 
 
+def mps_data(page_url, name):
+    """A miningpoolstats data file. Its page names the current stamp (var last_time),
+    and the data host answers 403 to any other stamp."""
+    text, _, _ = fetch(page_url)
+    m = re.search(r'var last_time = "(\d+)"', text)
+    if not m:
+        raise ValueError(f"no last_time on {page_url}")
+    return json.loads(fetch(MPS_DATA % (name, m.group(1)))[0])
+
+
+def resolves(name):
+    try:
+        socket.getaddrinfo(name, None)
+        return True
+    except OSError:
+        return False
+
+
+def blake2b_daily(cfg):
+    """Findings from miningpoolstats and DNS, and one line on Siacoin's hashrate for the report."""
+    out, info = [], ""
+    known = set(cfg.get("known_coins") or [])
+    domains = list(dict.fromkeys(cfg.get("domains") or []))
+    try:
+        for c in mps_data(cfg["coin_list"], "coins_data").get("data") or []:
+            algo = str(c.get("algo", "")).lower()
+            # "Blake2B" or a label like "BLAKE2b (XBT)"; not a combination such as "Blake2B + SHA3"
+            if "blake2b" in algo and "+" not in algo and c.get("page") not in known:
+                out.append(("outside", str(c.get("name") or c.get("page")),
+                            f"miningpoolstats lists a BLAKE2b coin not on the watch list: {c.get('page')}, {c.get('pools')} pools"))
+    except Exception as e:  # noqa: BLE001
+        out.append(("outside", "-", f"miningpoolstats coin list did not load: {type(e).__name__}: {e}"[:200]))
+    try:
+        sia = mps_data(cfg["coin_page"], urlsplit(cfg["coin_page"]).path.strip("/"))
+        rows = sorted(sia.get("data") or [], key=lambda p: -(p.get("hashrate") or 0))
+        for p in rows:
+            d = dom(urlsplit(p.get("url") or "").hostname)
+            if d and d not in domains:
+                out.append(("outside", "Siacoin", f"miningpoolstats lists a Siacoin pool not on the watch list: {p.get('url')}"))
+                domains.append(d)
+        info = "Siacoin per miningpoolstats: network %.2f PH/s; pools " % ((sia.get("hashrate") or 0) / 1e15) + ", ".join(
+            "%s %.2f" % (dom(urlsplit(p.get("url") or "").hostname), (p.get("hashrate") or 0) / 1e15) for p in rows)
+    except Exception as e:  # noqa: BLE001
+        out.append(("outside", "-", f"miningpoolstats Siacoin page did not load: {type(e).__name__}: {e}"[:200]))
+    for d in domains[:WATCH_MAX_DOMAINS]:
+        if resolves(f"rw-{secrets.token_hex(6)}.{d}"):
+            out.append(("outside", d, "answers any name in DNS, so its names cannot be checked"))
+            continue
+        for pre in cfg.get("prefixes") or []:
+            if resolves(f"{pre}.{d}"):
+                out.append(("outside", d, f"{pre}.{d} resolves: an endpoint for this chain?"))
+    return out, info
+
+
+def blake2b_watch_findings(state, cfg, rest):
+    """Hashrate that could come here without new machines: Siacoin is mined on the same ASICs.
+
+    Once a day, miningpoolstats' coin list (this chain would show up there as a new
+    BLAKE2b coin page), its Siacoin page (a new Siacoin pool) and names like xbt.<domain>
+    on the Siacoin pools' domains; every run, one subscribe to each "probe" endpoint,
+    reported when its job is built on this chain.
+    """
+    if not cfg:
+        return [], ""
+    w = state.setdefault("blake2b_watch", {})
+    try:
+        last = datetime.strptime(w.get("checked", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        last = 0
+    if datetime.now(timezone.utc).timestamp() - last >= WATCH_EVERY_H * 3600:
+        found, info = blake2b_daily(cfg)
+        w.update(checked=now_iso(), findings=[list(f) for f in found], info=info)
+    out, info = [tuple(f) for f in w.get("findings", [])], w.get("info", "")
+    if cfg.get("probe"):
+        try:
+            pp = _load("pp", os.path.join(HERE, "pool-probe.py"))
+        except Exception as e:  # noqa: BLE001
+            return out + [("outside", "-", f"pool-probe.py did not load: {e}"[:200])], info
+        for e in cfg["probe"]:
+            host, port, tls = pp.parse_endpoint(e)
+            try:
+                r = pp.probe(host, port, tls, 10, pp.DEFAULT_UA, 1.0)
+            except Exception as ex:  # noqa: BLE001
+                r = {"probed_at": now_iso(), "verdict": f"probe raised {type(ex).__name__}", "facts": {}}
+            ph = (r["facts"].get("job") or {}).get("prevhash")
+            built = pp.resolve_prevhash(ph, rest.rstrip("/"), 25) if ph else None
+            w.setdefault("probe", {})[f"{host}:{port}"] = {"at": r["probed_at"], "verdict": r["verdict"], "this_chain": bool(built)}
+            if built:
+                out.append(("outside", e.get("label") or host, f"{host}:{port} hands out work for this chain (job on height {built['height']})"))
+    return out, info
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-mail", action="store_true")
     ap.add_argument("--print", action="store_true")
     ap.add_argument("--feed", default=SITE_EPS)
+    ap.add_argument("--rest", default="http://127.0.0.1:8332/rest")
     a = ap.parse_args()
 
     doc = json.load(open(ENDPOINTS))
@@ -356,6 +464,8 @@ def main():
     cache = {}
     found = site_findings(pools, feed, cache) + third_party_findings(pools, feed, cache, doc.get("directories") or []) \
         + chain_findings(pools) + probe_findings(state)
+    outside, info = blake2b_watch_findings(state, doc.get("blake2b_watch"), a.rest)
+    found += outside
     prune_feed(feed)
     with open(a.feed + ".tmp", "w") as f:
         json.dump({"generated": now_iso(), "pools": feed}, f, indent=1, sort_keys=True)
@@ -369,7 +479,8 @@ def main():
     events = [l for l in lines if l.startswith("[probe]")]
     key = lambda l: re.sub(r"\d+", "N", l)  # noqa: E731
 
-    body = f"pool-site-watch {now_iso()}\n\n" + ("\n".join(lines) if lines else "no differences") + "\n"
+    body = f"pool-site-watch {now_iso()}\n\n" + ("\n".join(lines) if lines else "no differences") + "\n" \
+        + (f"\n{info}\n" if info else "")
     with open(REPORT + ".tmp", "w") as f:
         f.write(body)
     os.replace(REPORT + ".tmp", REPORT)

@@ -14,7 +14,8 @@
     "'changes' is a short dated list of what pools changed, taken from their own pages; the page shows it newest first next to what the chain shows.",
     "'closed': true on an endpoint marks one the pool's own site says is closed; it is still probed, but the page does not offer it.",
     "'unclaimed': true on an endpoint means a third party named it, not the pool; it is probed and shown but never counted as the pool's own claim.",
-    "'directories' are pages that list several pools (another pool's comparison table, a guide); pool-site-watch.py reads them every hour and keeps a host:port they name only when exactly one listed pool already uses its domain. The survey probes those as unclaimed."
+    "'directories' are pages that list several pools (another pool's comparison table, a guide); pool-site-watch.py reads them every hour and keeps a host:port they name only when exactly one listed pool already uses its domain. The survey probes those as unclaimed.",
+    "'blake2b_watch' is BLAKE2b hashrate that could move here without new machines: Siacoin is mined on the same ASICs. pool-site-watch.py reads miningpoolstats' coin list and Siacoin page and checks the names prefix.domain once a day, and probes the 'probe' endpoints every hour; it reports, it never adds a pool."
   ],
   "generated": "from the last 2016 blocks; share_pct and coinbase_class are informational",
   "pools": [
@@ -1187,5 +1188,33 @@
       "what": "a miner seller's guide to the pools on this chain, with endpoints",
       "added": "2026-10-17"
     }
-  ]
+  ],
+  "blake2b_watch": {
+    "coin_list": "https://miningpoolstats.stream/",
+    "coin_page": "https://miningpoolstats.stream/siacoin",
+    "known_coins": [
+      "siacoin",
+      "bitcoinx"
+    ],
+    "domains": [
+      "f2pool.com",
+      "dxpool.com",
+      "luxor.tech",
+      "antpool.com"
+    ],
+    "prefixes": [
+      "xbt",
+      "btcb2",
+      "blake2b",
+      "bip110"
+    ],
+    "probe": [
+      {
+        "label": "F2Pool Siacoin",
+        "url": "stratum+tcp://sc.f2pool.com:7788",
+        "source": "F2Pool's Siacoin stratum per mining guides; answered a subscribe with a Siacoin job, 2026-10-17"
+      }
+    ],
+    "notes": "Siacoin pools from miningpoolstats.stream/siacoin (F2Pool, DxPool, Luxor, read 2026-10-17) and AntPool from older Siacoin pool lists. nanopool.org is left out: it answers any name in DNS. BitcoinX is a BLAKE2b coin with almost no hashrate. sc.luxor.tech:700 accepts a connection but never answered a subscribe, so it is not probed."
+  }
 }
