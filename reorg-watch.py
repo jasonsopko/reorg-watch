@@ -1107,7 +1107,7 @@ TIPS = {
     "choose_share": "This pool's blocks divided by all blocks in the last 7 days by header time.",
     "choose_bpd": "Blocks this pool found per day over the last 7 days. On a pool that pays every block, this is how often a payout arrives.",
     "choose_datum": "Whether the pool runs a DATUM service that your own DATUM gateway can connect to. Verified means this site completed a real DATUM handshake with the pool's published pubkey, the opening exchange a gateway makes, and closed the session; the time is when. Published, failing means the endpoint and key are on the pool's site but the last handshake failed, with the reason. No pubkey means the service cannot be verified, only the port checked. The fee is what the pool's site says, read on the date in pools.json.",
-    "choose_sv1": "Public stratum v1 endpoints that answered a probe with work for this chain. Ports come from the pool's own pages, read every hour, as well as this site's list, so a port a page adds is probed the next hour. Closed means the pool's own site says the path is closed, whatever the port still answers. The fee is what the pool's site says, read on the date in pools.json.",
+    "choose_sv1": "Public stratum v1 endpoints that answered a probe with work for this chain. Ports come from the pool's own pages, read every hour, as well as this site's list, so a port a page adds is probed the next hour. A port another site names on the pool's own domain is probed too and marked as named on another site. Closed means the pool's own site says the path is closed, whatever the port still answers. The fee is what the pool's site says, read on the date in pools.json.",
     "survey_path": "The same reading as the Choosing a pool table: DATUM only when the pool has a DATUM service and no stratum port on file handed out work for this chain this hour; DATUM, also takes stratum when stratum ports handed out work too; stratum only when no DATUM service was found. A port that answers a subscribe but gives the probe no job, even after it authorizes a throwaway worker, does not count. The count is how many stratum ports handed out work.",
     "choose_claims": "What the pool's own pages claim, next to what this site's probe found, checked every hour: a path the site calls closed (do its ports still answer a subscribe and hand out work for this chain?), the DATUM service the site publishes (does a real handshake verify it?), and the stratum ports the page lists (do they answer?). Agrees and differs are the probe's reading of the pool's own words. On a port the site calls closed, and on any port that answers a subscribe without a job, the probe also authorizes a throwaway worker and watches whether the pool accepts it and sends work. That is as far as it goes: it never submits a share, so whether shares sent there are credited or paid is not measured.",
     "choose_changes": "What pools changed lately: dated statements from their own pages, and what the chain shows. The chain part is measured from this site's coinbase index, day by day: when a pool's blocks switched between being built by its own stratum server and through DATUM gateways with the pool upstream, and when the number of coinbase outputs changed size class. A switch is reported once it has held for a full day. Gateway names are the distinct second coinbase tags seen in the pool's blocks that day.",
@@ -1544,7 +1544,8 @@ def render_survey(sd, E, tiers=None):
             eps = "<br>".join(
                 f'<span class=mono>{E(e["endpoint"])}</span> {E(e.get("verdict", "-"))}'
                 + (f' &middot; {E(e["software"])}' if e.get("software") not in (None, "-", "unknown", "unparsed") else "")
-                + (' <span class=note>(from the site)</span>' if e.get("discovered") else "")
+                + (' <span class=note>(named on another site)</span>' if e.get("third_party")
+                   else ' <span class=note>(from the site)</span>' if e.get("discovered") else "")
                 for e in probed)
         else:
             eps = '<span class=note>no endpoint recorded yet</span>'
@@ -2001,13 +2002,15 @@ def choose_rows(sd, week, week_total, canaries):
                     "closed": r.get("sv1_closed"),
                     "other_chain": [e["endpoint"] for e in v1_all if e.get("chain") == "other"],
                     "closed_endpoints": [e["endpoint"] for e in v1_all if e.get("closed")],
-                    "from_site": [e["endpoint"] for e in v1_all if e.get("discovered")]},
+                    "from_site": [e["endpoint"] for e in v1_all if e.get("discovered") and not e.get("third_party")],
+                    "named_elsewhere": [e["endpoint"] for e in v1_all if e.get("third_party")]},
             "datum": {"status": dshort, "detail": dstat, "fee": terms.get("datum_fee", ""), "check": check, "endpoints": d_eps},
             "trust": {"sv1_port": trust_v1, "own_gateway": trust_gw},
             "datum_offered": datum_ok,
             "tier": tier, "tier_label": tier_label,
             "sv1_answering": sv1_answering, "sv1_work": sv1_work,
-            "site": {"read": site.get("read"), "pages": len(site.get("pages") or []), "discovered": site.get("discovered") or []},
+            "site": {"read": site.get("read"), "pages": len(site.get("pages") or []), "discovered": site.get("discovered") or [],
+                     "named_elsewhere": site.get("named_elsewhere") or []},
             "changes": {"onchain": r.get("onchain_changes") or [], "gateway_names": r.get("gateway_names_today")},
             "claims": r.get("claims") or [],
             "canary": {path: canaries[(label, path)] for path in ("sv1", "datum") if (label, path) in canaries},

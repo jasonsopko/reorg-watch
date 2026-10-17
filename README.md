@@ -279,7 +279,11 @@ scripts in `poolprobe/`:
 - `pool-site-watch.py` reads each pool's own pages every hour and writes
   `site-endpoints.json`, every host:port and DATUM pubkey the pages show,
   with first and last seen times. It also mails when what the pages show
-  differs from the hand-kept list.
+  differs from the hand-kept list. A host:port that some other page names
+  for a listed pool (another pool's comparison table, or a page under
+  `directories` in the list) is kept too, but only when exactly one listed
+  pool already uses that domain; the survey probes it as unclaimed and the
+  page marks it "named on another site".
 - `pool-survey.py` probes every listed endpoint and every endpoint the pages
   show that the list lacks: one Stratum v1 `mining.subscribe` for a stratum
   port, whose job is matched to this chain, and one real DATUM handshake

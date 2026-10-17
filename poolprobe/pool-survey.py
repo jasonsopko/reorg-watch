@@ -11,7 +11,9 @@ Endpoints come from two places: the hand-kept list (pool-endpoints.json, with
 the pool's own pages as the source) and the endpoints pool-site-watch.py last
 read off those pages (site-endpoints.json). A port that appears on a pool's
 page is probed the next hour whether or not anyone has edited the list, and a
-listed port the page no longer shows is still probed and marked as such.
+listed port the page no longer shows is still probed and marked as such. A port
+some other page names for the pool is probed too, marked unclaimed and
+third_party, since the pool itself did not say it.
 
 A stratum port is probed with one mining.subscribe. A DATUM port is probed
 with one real DATUM handshake against the pool's published pubkey, which
@@ -249,7 +251,11 @@ def site_endpoints_for(site, label, listed):
             gone.append(hp)
     keys = [k for k, info in (rec.get("pubkeys") or {}).items()
             if (parse_iso(info.get("last_seen", "")) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff]
-    return found, sorted(set(gone)), keys, rec.get("read"), rec.get("pages") or [], bool(rec.get("readable"))
+    own = {hp for hp, _ in found}
+    third = [(hp, info.get("page", ""), info.get("last_seen", "")) for hp, info in (rec.get("third_party") or {}).items()
+             if hp not in listed and hp not in own
+             and (parse_iso(info.get("last_seen", "")) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff]
+    return found, sorted(set(gone)), keys, rec.get("read"), rec.get("pages") or [], bool(rec.get("readable")), third
 
 
 def datum_status(pool, checks, dstate, probed_eps=()):
@@ -488,14 +494,21 @@ def main():
             if host and port:
                 listed.add("%s:%d" % (host, port))
                 targets.append((p["label"], host, port, tls, ep))
-        found, gone, keys, read, pages, readable = site_endpoints_for(site, p["label"], listed)
+        found, gone, keys, read, pages, readable, third = site_endpoints_for(site, p["label"], listed)
         site_info[p["label"]] = {"read": read, "pages": pages, "discovered": [hp for hp, _ in found],
+                                 "named_elsewhere": [hp for hp, _, _ in third],
                                  "gone": gone, "pubkeys_on_site": keys, "readable": readable}
         for hp, page in found:
             host, _, port = hp.rpartition(":")
             targets.append((p["label"], host, int(port), False,
                             {"url": "stratum+tcp://" + hp, "expect": "unknown", "role": "on the pool's site, not in the list",
                              "source": "%s (read %s)" % (page, (read or "")[:10]), "discovered": True}))
+        for hp, page, seen in third:
+            host, _, port = hp.rpartition(":")
+            targets.append((p["label"], host, int(port), False,
+                            {"url": "stratum+tcp://" + hp, "expect": "unknown", "role": "named on another site, not the pool's own",
+                             "source": "%s (read %s)" % (page, seen[:10]), "discovered": True, "unclaimed": True,
+                             "third_party": True}))
 
     # --- probe (or reuse the newest record per endpoint) ---
     results, checks = {}, {}
@@ -595,7 +608,8 @@ def main():
             rec = {"endpoint": key, "role": ep.get("role", ""), "expect": ep.get("expect", ""),
                    "source": ep.get("source", ""), "discovered": bool(ep.get("discovered")),
                    "closed": bool(ep.get("closed")), "unclaimed": bool(ep.get("unclaimed")),
-                   "on_site": (key not in site_info[label]["gone"]) if site_info[label]["readable"] else None}
+                   "third_party": bool(ep.get("third_party")),
+                   "on_site": (key not in site_info[label]["gone"]) if site_info[label]["readable"] and not ep.get("third_party") else None}
             if r:
                 sub = next((l for l in r.get("reply_lines", []) if '"result"' in l and "mining." in l), None)
                 sw, why = pp.fingerprint(sub, r["facts"].get("configure_reply", "(silent)")) if sub else ("-", "")

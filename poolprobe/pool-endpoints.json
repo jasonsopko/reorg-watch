@@ -13,7 +13,8 @@
     "'sv1_closed' records a pool's own statement that its stratum path is closed, with the date and page; the probe still tests the ports.",
     "'changes' is a short dated list of what pools changed, taken from their own pages; the page shows it newest first next to what the chain shows.",
     "'closed': true on an endpoint marks one the pool's own site says is closed; it is still probed, but the page does not offer it.",
-    "'unclaimed': true on an endpoint means a third party named it, not the pool; it is probed and shown but never counted as the pool's own claim."
+    "'unclaimed': true on an endpoint means a third party named it, not the pool; it is probed and shown but never counted as the pool's own claim.",
+    "'directories' are pages that list several pools (another pool's comparison table, a guide); pool-site-watch.py reads them every hour and keeps a host:port they name only when exactly one listed pool already uses its domain. The survey probes those as unclaimed."
   ],
   "generated": "from the last 2016 blocks; share_pct and coinbase_class are informational",
   "pools": [
@@ -1173,6 +1174,18 @@
       "pool": "Lazarus",
       "text": "Public-stratum fee raised from 15% to 25% from block 973,750; 12.5 points of it are credited to DATUM miners. Site moved to pool.lazarus-xbt.xyz.",
       "source": "https://pool.lazarus-xbt.xyz/connect (read 2026-09-29)"
+    }
+  ],
+  "directories": [
+    {
+      "url": "https://pool.lazarus-xbt.xyz/",
+      "what": "Lazarus's table of the pools its stratum relays to, with their stratum and DATUM endpoints",
+      "added": "2026-10-17"
+    },
+    {
+      "url": "https://bt-miners.com/btcb2-mining-pools-decentralize-hashrate/",
+      "what": "a miner seller's guide to the pools on this chain, with endpoints",
+      "added": "2026-10-17"
     }
   ]
 }

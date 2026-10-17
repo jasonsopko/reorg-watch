@@ -14,9 +14,12 @@ does two things with what it finds:
      DATUM pubkey seen on each pool's own pages, with first/last seen times.
      pool-survey.py probes the endpoints in it that the list does not have,
      so a port a pool adds to its page is tested the next hour, by itself.
+     Under "third_party" it also keeps host:ports that some other page names
+     for a listed pool (another pool's comparison table, or a directory page
+     from the list's "directories"); the survey probes those as unclaimed.
   2. mails when the set of differences changes:
      - site: host:ports or pubkeys on the pages that the list lacks, or listed
-       ones gone from the pages
+       ones gone from the pages, and what other pages name for a pool
      - chain: labels with blocks in the last day that the list does not cover,
        and listed labels with no blocks in the last two weeks
      - probe: an endpoint whose survey verdict changed and stayed changed for
@@ -62,6 +65,7 @@ RECENT_BLOCKS = 144      # a day: an unlisted label with blocks here is worth a 
 QUIET_BLOCKS = 2016      # two weeks: a listed label with nothing here may be retired
 MIN_UNLISTED = 3
 FORGET_DAYS = 30         # a page endpoint unseen this long is dropped from the feed
+THIRD_PARTY_MAX = 20     # endpoints taken from one page for other pools; the rest are reported, not probed
 
 
 def now_iso():
@@ -112,9 +116,23 @@ def dom(host):
     return ".".join((host or "").split(":")[0].split(".")[-2:])
 
 
-def site_findings(pools, feed):
+def page_hostports(text, final):
+    """host:port strings on a page, less web, node and explorer ports and the page's own address."""
+    own = urlsplit(final)
+    out = []
+    for host, port in HOSTPORT.findall(text) + HOSTPORT.findall(TAG.sub(" ", text)) + CONFHOST.findall(text):
+        host = host.lower()
+        if port in WEB_PORTS or port in OTHER_PORTS or (host == (own.hostname or "") and port == str(own.port or "")):
+            continue
+        if re.search(r"\.(png|jpe?g|svg|css|js|php|html?)$", host):
+            continue
+        out.append(f"{host}:{port}")
+    return out
+
+
+def site_findings(pools, feed, cache):
     """Findings about the pages, and the per-pool record of what they showed."""
-    found, cache = [], {}
+    found = []
     # Pools with several products (PyBLOCK) share pages, so a port on the page
     # counts as listed if any row on the same domain lists it.
     by_domain = {}
@@ -142,13 +160,8 @@ def site_findings(pools, feed):
             if unverified:
                 insecure.append(url)
             own = urlsplit(final)
-            for host, port in HOSTPORT.findall(text) + HOSTPORT.findall(TAG.sub(" ", text)) + CONFHOST.findall(text):
-                host = host.lower()
-                if port in WEB_PORTS or port in OTHER_PORTS or (host == (own.hostname or "") and port == str(own.port or "")):
-                    continue
-                if re.search(r"\.(png|jpe?g|svg|css|js|php|html?)$", host):
-                    continue
-                seen.setdefault(f"{host}:{port}", url)
+            for hp in page_hostports(text, final):
+                seen.setdefault(hp, url)
             for k in PUBKEY.findall(text):
                 keys.setdefault(k.lower(), url)
             if urlsplit(url).hostname != own.hostname:
@@ -190,10 +203,74 @@ def site_findings(pools, feed):
     return found
 
 
+def pool_domains(p):
+    """Domains a pool uses itself: its link and the hosts on its list entries."""
+    hosts = [urlsplit(p.get("link") or "").hostname] + [h.split(":")[0] for h in listed_hostports(p)]
+    return {dom(h) for h in hosts if h}
+
+
+def third_party_findings(pools, feed, cache, directories):
+    """Endpoints a page names for some other listed pool.
+
+    Pool pages name each other (Lazarus prints a table of the pools its stratum
+    relays to) and directory pages list several pools, and both go stale. A
+    host:port is kept only when exactly one listed pool already uses its domain
+    and the page is not on that domain, at most THIRD_PARTY_MAX per page, so a
+    page can never send the probe anywhere new. Anything else is reported for
+    a person to look at.
+    """
+    owners = {}
+    for p in pools:
+        if p.get("kind", "pool") == "pool":
+            for d in pool_domains(p):
+                owners.setdefault(d, []).append(p["label"])
+    anywhere = set().union(*(listed_hostports(p) for p in pools))
+    dir_urls = [d["url"] for d in directories if d.get("url")]
+    found, named, stamp = [], {}, now_iso()
+    for url in dir_urls:
+        if url not in cache:
+            try:
+                cache[url] = fetch(url)
+            except Exception as e:  # noqa: BLE001
+                cache[url] = e
+        if isinstance(cache[url], Exception):
+            found.append(("site", "-", f"directory page did not load: {url}: {type(cache[url]).__name__}"[:200]))
+    for url, got in cache.items():
+        if isinstance(got, Exception):
+            continue
+        text, final, _ = got
+        page = urlsplit(final).hostname or ""
+        taken = over = 0
+        for hp in dict.fromkeys(page_hostports(text, final)):
+            if hp in anywhere or dom(hp) == dom(page):
+                continue
+            labels = owners.get(dom(hp), [])
+            own = (feed.get(labels[0]) or {}) if len(labels) == 1 else {}
+            if own.get("read") and (own.get("endpoints", {}).get(hp) or {}).get("last_seen") == own["read"]:
+                continue                                     # the pool's own page shows it this run
+            if len(labels) == 1 and taken < THIRD_PARTY_MAX:
+                taken += 1
+                named.setdefault((labels[0], hp), []).append(page)
+                rec = feed.setdefault(labels[0], {"endpoints": {}, "pubkeys": {}})
+                e = rec.setdefault("third_party", {}).setdefault(hp, {"first_seen": stamp})
+                e.update(last_seen=stamp, page=url)
+            elif len(labels) == 1:
+                over += 1
+            elif labels:
+                found.append(("site", "-", f"{url} names {hp}; {', '.join(labels)} share that domain, so it is not probed"))
+            elif url in dir_urls:
+                found.append(("site", "-", f"{url} names {hp}, on a domain no listed pool uses"))
+        if over:
+            found.append(("site", "-", f"{url} names more than {THIRD_PARTY_MAX} endpoints of other pools; {over} not probed"))
+    for (label, hp), pages in named.items():
+        found.append(("site", label, f"named on {', '.join(sorted(set(pages)))}, not in the list: {hp}"))
+    return found
+
+
 def prune_feed(feed):
     cutoff = datetime.now(timezone.utc).timestamp() - FORGET_DAYS * 86400
     for rec in feed.values():
-        for kind in ("endpoints", "pubkeys"):
+        for kind in ("endpoints", "pubkeys", "third_party"):
             for k in list(rec.get(kind, {})):
                 try:
                     seen = datetime.strptime(rec[kind][k]["last_seen"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
@@ -265,7 +342,8 @@ def main():
     ap.add_argument("--feed", default=SITE_EPS)
     a = ap.parse_args()
 
-    pools = json.load(open(ENDPOINTS))["pools"]
+    doc = json.load(open(ENDPOINTS))
+    pools = doc["pools"]
     try:
         state = json.load(open(STATE))
     except Exception:  # noqa: BLE001
@@ -275,7 +353,9 @@ def main():
     except Exception:  # noqa: BLE001
         feed = {}
 
-    found = site_findings(pools, feed) + chain_findings(pools) + probe_findings(state)
+    cache = {}
+    found = site_findings(pools, feed, cache) + third_party_findings(pools, feed, cache, doc.get("directories") or []) \
+        + chain_findings(pools) + probe_findings(state)
     prune_feed(feed)
     with open(a.feed + ".tmp", "w") as f:
         json.dump({"generated": now_iso(), "pools": feed}, f, indent=1, sort_keys=True)
