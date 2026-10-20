@@ -149,6 +149,7 @@ it from these, each run from its own cron line:
 */5 * * * *  $HOME/reorg-watch/forktips/peer-crawl.py --limit 60 --threads 14 --timeout 10
 35 * * * *   $HOME/reorg-watch/poolprobe/pool-site-watch.py
 47 * * * *   $HOME/reorg-watch/poolprobe/pool-survey.py --out $HOME/.reorg-watch/pool-survey.json
+* * * * *    flock -n $HOME/.reorg-watch/sv1-jobs.lock $HOME/reorg-watch/poolprobe/sv1-jobs.py
 ```
 
 - `forktips/chain-tips.py` reads `getchaintips` over RPC and writes
@@ -166,6 +167,17 @@ it from these, each run from its own cron line:
 - `poolprobe/` holds the pool survey described under Choosing a pool, and
   `pool-endpoints.json`, the hand-kept list of pool endpoints with the page
   and date each one was read from.
+- `poolprobe/sv1-jobs.py` stays connected to every public stratum port the
+  survey saw handing out work for this chain, one idle client per port that
+  never submits a share, and remembers the header commitment of every job.
+  A new block whose commitment a port handed out was built by the node
+  behind that port, the pool's own, not a miner's. Each match teaches it the
+  gateway's coinbase identity (tags, unique id, pool session id), written to
+  `sv1-port-identities.json`; cesspool.lol reads that file to count such
+  blocks toward the pool instead of "DATUM miners via" it. A job's
+  commitment depends on the hasher's difficulty tier, which the gateway
+  writes into the coinbase, so the client reconnects every ten minutes to
+  walk the tiers again; `flock` keeps one copy running and cron restarts it.
 
 Alert mail from `tip-watch.py` and `pool-site-watch.py` goes to the address
 in `~/.reorg-watch/mailto`, one line. Without that file they mail nothing.
