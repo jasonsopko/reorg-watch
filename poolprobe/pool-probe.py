@@ -57,12 +57,13 @@ def parse_endpoint(ep):
 
 def sia_coinb1_commitment(coinb1_hex):
     """BLAKE2b jobs do not carry a coinbase. datum_pow.c:172 builds a 39-byte
-    'sia coinb1': 3 zero bytes, the 32-byte header commitment, 4 zero bytes."""
+    'sia coinb1': 3 zero bytes, the 32-byte header commitment, 4 zero bytes. The fork
+    with an 8-byte extranonce1 moves those 4 zero bytes into extranonce1 and sends 35."""
     try:
         b = bytes.fromhex(coinb1_hex)
     except Exception:
         return None
-    if len(b) != 39 or b[0:3] != b"\x00" * 3 or b[35:39] != b"\x00" * 4:
+    if len(b) not in (35, 39) or b[0:3] != b"\x00" * 3 or b[35:] != b"\x00" * (len(b) - 35):
         return None
     return b[3:35].hex()
 
