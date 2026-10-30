@@ -98,6 +98,7 @@ UNATTRIBUTED_MIN_BLOCKS = 60   # and at least this many blocks in those 24 h
 BRANCH_ALERT_LEN = 3      # a competing branch at least this long...
 BRANCH_ALERT_GAP = 2      # ...whose tip is within this many blocks of ours, or above it
 AHEAD_NOTE = 2            # crawled peers this many blocks past our tip get a note on the page
+MAJORITY_LEAD = 3         # an outside chain on a block this node refused, this far past our tip
 NOW = time.time()
 
 
@@ -1115,6 +1116,20 @@ def line_for(e):
         who = ", ".join(f"{p} {n}" for p, n in e["pools"].items()) or "unknown"
         return (f"ALERT block {e['height']} {e['hash'][:16]} is invalid under this node's rules; mined by {who}. "
                 f"A miner on other rules forks off the chain each time it builds on it")
+    if t == "refused_branch_ahead":
+        src = []
+        if e.get("explorer"):
+            x = e["explorer"]
+            src.append(f"{one_line(x['name'], 40)} is at {x['tip']} and its block {e['height']} is the one refused here")
+        if e.get("peers"):
+            p = e["peers"]
+            ag = ", ".join(f"{one_line(k, 12)} x{n}" for k, n in p["agents"].items())
+            src.append(f"{p['n']} of {p['of']} peers on this chain that answered peer-crawl at {one_line(p['at'], 20)} "
+                       f"send headers on it up to {p['best']}, work checked ({ag})")
+        tail = ("Nodes still on Knots 29.4.2 follow that branch; this node and other 29.4.3 nodes do not" if e.get("split")
+                else "Nodes that accept that block follow that branch; this node does not")
+        return (f"ALERT the branch this node refused at block {e['height']} {e['hash']} may be the majority: it reaches "
+                f"{e['best']}, {e['lead']} blocks past this node's tip {e['active_height']}. {'; '.join(src)}. {tail}")
     if t == "competing_branch":
         who = ", ".join(f"{p} {n}" for p, n in e["pools"].items()) or "blocks not yet validated"
         return (f"ALERT competing branch of {e['branchlen']} blocks from height {e['forked_at']}: its tip {e['tip_height']} "
@@ -1970,6 +1985,93 @@ def competing_branch_checks(sd, st, events, now, rest=None, rw=None, pool_list=N
                        "status": br.get("status"), "tip_hash": br.get("tip_hash"),
                        "pools": dict(sorted(pools.items(), key=lambda kv: -kv[1])[:3])})
     for key in [k for k, v in seen.items() if now - v["t"] > 86400]:
+        del seen[key]
+
+
+def agent_counts(peers):
+    """Peers' node versions, cut to the Satoshi:x.y.z number so peer text never reaches an alert."""
+    out = {}
+    for r in peers:
+        m = re.search(r"Satoshi:(\d{1,3}(?:\.\d{1,3}){1,2})", str(r.get("user_agent") or ""))
+        k = m.group(1) if m else "other"
+        out[k] = out.get(k, 0) + 1
+    return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+
+def refused_branch_checks(sd, st, events, now, explorer=""):
+    """Whether a branch this node refused is outgrowing ours. The node drops headers built on a
+    refused block, so getchaintips never shows that branch grow; the views come from outside:
+    the explorer's chain, and peers asked directly by peer-crawl.py. A view counts only when it
+    carries the refused block itself, by hash, so a node that is merely behind, or a branch
+    refused long ago, raises nothing. Alert when that chain is MAJORITY_LEAD blocks past our
+    tip, again when it has grown by three blocks, or after 30 minutes if it has grown at all."""
+    H = st.get("tip_height")
+    try:
+        with open(os.path.join(sd, "chain-tips.json")) as f:
+            d = json.load(f)
+    except Exception:  # noqa: BLE001 - no tips file yet, or a half-written one
+        return
+    risk = st.setdefault("risk", {})
+    split = {x.get("hash"): x.get("height") for x in risk.get("split_seen", [])}
+    # Every block of each invalid branch, so a view that holds any of them links to the branch.
+    # A branch is named by the block the maturity check found, else by its oldest block here.
+    refused, name = {}, {}
+    for br in d.get("branches", []):
+        if br.get("status") == "invalid":
+            blocks = {b.get("hash"): b.get("height") for b in br.get("lost", []) + [
+                {"hash": br.get("tip_hash"), "height": br.get("tip_height")}]
+                if isinstance(b.get("hash"), str) and isinstance(b.get("height"), int)}
+            if not blocks:
+                continue
+            key = next((h for h in blocks if h in split), min(blocks, key=blocks.get))
+            name[key] = blocks[key]
+            refused.update({h: (ht, key) for h, ht in blocks.items()})
+    if not isinstance(H, int) or not refused:
+        return
+    views = {}
+    etip = st.get("explorer_tip")
+    if explorer and not st.get("explorer_fail_runs") and isinstance(etip, int) and etip - H >= MAJORITY_LEAD:
+        # Only while the explorer is ahead, and only the four latest refused heights it covers.
+        base = explorer.rstrip("/")
+        for h in sorted({h for h, _ in refused.values() if H - 2016 < h <= etip}, reverse=True)[:4]:
+            try:
+                eh = http_get(f"{base}/api/block-height/{h}", timeout=15, retries=1).decode().strip()
+            except Exception:  # noqa: BLE001
+                continue
+            if refused.get(eh, (None,))[0] == h:
+                views.setdefault(refused[eh][1], {})["explorer"] = {"name": urllib.parse.urlparse(base).netloc or base,
+                                                                   "tip": etip}
+    try:
+        with open(os.path.join(sd, "peer-crawl.json")) as f:
+            cw = json.load(f)
+        crawl_t = datetime.strptime(cw["generated"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except Exception:  # noqa: BLE001
+        cw, crawl_t = None, 0
+    if cw and now - crawl_t <= 15 * 60:   # the crawl runs every 5 minutes; older is a stopped crawl
+        on = {}
+        for r in cw.get("peers") or []:
+            link = r.get("on_refused") or {}
+            # the same set peer-crawl's blake2b count covers, so n of m compares like with like
+            if (r.get("blake2b") and link.get("work_checked") is True
+                    and refused.get(link.get("hash"), (None,))[0] == link.get("height")
+                    and isinstance(r.get("their_tip"), int)):
+                on.setdefault(refused[link["hash"]][1], []).append(r)
+        for hsh, rs in on.items():
+            views.setdefault(hsh, {})["peers"] = {"n": len(rs), "of": cw.get("blake2b"), "at": cw["generated"],
+                                                 "best": max(r["their_tip"] for r in rs), "agents": agent_counts(rs)}
+    seen = risk.setdefault("refused_ahead", {})
+    for hsh, v in views.items():
+        best = max(([v["explorer"]["tip"]] if "explorer" in v else []) + ([v["peers"]["best"]] if "peers" in v else []))
+        if best - H < MAJORITY_LEAD:
+            continue
+        prev = seen.get(hsh)
+        if prev and best < prev["tip"] + 3 and not (now - prev["t"] >= 1800 and best > prev["tip"]):
+            continue
+        seen[hsh] = {"tip": best, "t": now, "height": name[hsh], "lead": best - H,
+                     "src": ([v["explorer"]["name"]] if "explorer" in v else []) + (["peers"] if "peers" in v else [])}
+        events.append(dict(v, type="refused_branch_ahead", level="ALERT", height=name[hsh], hash=hsh,
+                           active_height=H, best=best, lead=best - H, split=hsh in split))
+    for key in [k for k, x in seen.items() if now - x["t"] > 7 * 86400]:
         del seen[key]
 
 
@@ -3447,6 +3549,10 @@ def main():
 
     concentration_checks(sd, st, events, NOW, rw)
     competing_branch_checks(sd, st, events, NOW, rest, rw, pools)
+    try:
+        refused_branch_checks(sd, st, events, NOW, args.explorer)
+    except Exception as e:  # noqa: BLE001 - a bad state file must not stop the page or the mail
+        print(f"{ts()} refused branch check failed: {e}")
 
     finish(sd, args, st, state_path, events)
     if args.verbose and not events:
