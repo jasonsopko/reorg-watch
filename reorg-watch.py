@@ -1847,6 +1847,14 @@ def one_line(s, cap=80):
     return re.sub(r"[^\x20-\x7e]", " ", str(s))[:cap]
 
 
+def plain_line(s):
+    """An alert line as it goes to the mail and the log. Pool names from the pools list reach
+    these lines; C0 and C1 controls (LF, CR, ESC, NEL) and the Unicode line and paragraph
+    separators become spaces, so a name can neither start a line of its own that looks like
+    an alert nor send a terminal escape to whoever reads the log."""
+    return re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", " ", s)
+
+
 def mtp_of(rest, blockhash):
     """Median time past of a block. REST serves headers only on the active chain; off it, the
     block's own record carries the same field, for any block whose data the node holds."""
@@ -3623,12 +3631,10 @@ def finish(sd, args, st, state_path, events):
             e["_t"] = NOW
             ev.write(json.dumps(e, sort_keys=True) + "\n")
             md.write(md_for(e))
-            line = line_for(e)
+            line = plain_line(line_for(e))
             print(f"{ts()} {line}")
             if e.get("level") == "ALERT":
-                # Pool names from the pools list reach these lines; a newline in one would put
-                # a line of its author's choosing in the mail, looking like an alert of its own.
-                alerts.append(re.sub(r"[\x00-\x1f\x7f]", " ", line))
+                alerts.append(line)
     if alerts and args.notify:
         msg = "reorg-watch " + ts() + "\n" + "\n".join(alerts) + "\n"
         try:
