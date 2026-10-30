@@ -42,7 +42,9 @@ def netaddr(services=0):
 
 
 def version_payload(ua):
-    return (struct.pack("<i", 70016) + struct.pack("<Q", 0) + struct.pack("<q", int(time.time()))
+    # NODE_BLAKE2B in our services: Knots 29.4.3 serves headers past the fork only to peers
+    # that set it, and answers getheaders from anyone else with an empty list.
+    return (struct.pack("<i", 70016) + struct.pack("<Q", NODE_BLAKE2B) + struct.pack("<q", int(time.time()))
             + netaddr() + netaddr() + struct.pack("<Q", random.getrandbits(64))
             + varstr(ua) + struct.pack("<i", 0) + b"\x00")
 
