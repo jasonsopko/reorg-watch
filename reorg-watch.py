@@ -2029,7 +2029,7 @@ def refused_branch_checks(sd, st, events, now, explorer=""):
     the explorer's chain, and peers asked directly by peer-crawl.py. A view counts only when it
     carries the refused block itself, by hash, so a node that is merely behind, or a branch
     refused long ago, raises nothing. Alert when that chain is MAJORITY_LEAD blocks past our
-    tip, again when it has grown by three blocks, or after 30 minutes if it has grown at all."""
+    tip, again when peers show it three blocks longer, or after 30 minutes if it has grown at all."""
     H = st.get("tip_height")
     try:
         with open(os.path.join(sd, "chain-tips.json")) as f:
@@ -2089,10 +2089,14 @@ def refused_branch_checks(sd, st, events, now, explorer=""):
         best = max(([v["explorer"]["tip"]] if "explorer" in v else []) + ([v["peers"]["best"]] if "peers" in v else []))
         if best - H < MAJORITY_LEAD:
             continue
+        # Peers' headers are checked for work and the explorer's tip is not, so only growth peers
+        # show re-alerts on three blocks; growth only the explorer reports waits the 30 minutes.
+        ptip = v["peers"]["best"] if "peers" in v else None
         prev = seen.get(hsh)
-        if prev and best < prev["tip"] + 3 and not (now - prev["t"] >= 1800 and best > prev["tip"]):
+        if prev and not (ptip is not None and ptip >= (prev.get("peer_tip") or 0) + 3) and not (
+                now - prev["t"] >= 1800 and best > prev["tip"]):
             continue
-        seen[hsh] = {"tip": best, "t": now, "height": name[hsh], "lead": best - H,
+        seen[hsh] = {"tip": best, "peer_tip": ptip, "t": now, "height": name[hsh], "lead": best - H,
                      "src": ([v["explorer"]["name"]] if "explorer" in v else []) + (["peers"] if "peers" in v else [])}
         events.append(dict(v, type="refused_branch_ahead", level="ALERT", height=name[hsh], hash=hsh,
                            active_height=H, best=best, lead=best - H, split=hsh in split))
