@@ -153,7 +153,7 @@ def parse_headers(body):
                 h = hdrv2.HeaderV2.deserialize(raw)
                 rec.update({"height": h.m_height,
                             "prev": hdrv2.wire_to_display(h.hashPrevBlock),
-                            "hash": h.block_hash_display_hex()})
+                            "hash": h.block_hash_display_hex(), "bits": h.nBits})
             except Exception as e:
                 rec["error"] = str(e)
         else:
