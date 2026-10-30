@@ -31,8 +31,9 @@ _spec.loader.exec_module(rw)
 
 def _atomic_write(path, obj):
     """The page reads these files on a one-minute cron. Writing in place lets it catch a
-    half-written file and silently drop the section, so write beside and rename."""
-    tmp = path + ".tmp"
+    half-written file and silently drop the section, so write beside and rename. tip-watch.py
+    runs this too, so two runs can overlap; each writes its own temporary file."""
+    tmp = "%s.%d.tmp" % (path, os.getpid())
     with open(tmp, "w") as f:
         json.dump(obj, f, indent=2)
     os.replace(tmp, path)
