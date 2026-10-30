@@ -1852,8 +1852,9 @@ def plain_line(s):
     """An alert line as it goes to the mail and the log. Pool names from the pools list reach
     these lines; C0 and C1 controls (LF, CR, ESC, NEL) and the Unicode line and paragraph
     separators become spaces, so a name can neither start a line of its own that looks like
-    an alert nor send a terminal escape to whoever reads the log."""
-    return re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]", " ", s)
+    an alert nor send a terminal escape to whoever reads the log. So do lone surrogates
+    (JSON allows "\\ud800"), which a strict UTF-8 write refuses."""
+    return re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\ud800-\udfff]", " ", s)
 
 
 def mtp_of(rest, blockhash):
@@ -3369,7 +3370,9 @@ html.js section.tab {{ display: none; }}
 </html>
 """
     page = stackable(page)
-    with open(path + ".tmp", "w") as f:
+    # errors="replace": a lone surrogate in a pool name would otherwise stop every render
+    # while its block is on the page
+    with open(path + ".tmp", "w", errors="replace") as f:
         f.write(page)
     os.replace(path + ".tmp", path)
     if choose:
@@ -3464,6 +3467,8 @@ def report(sd, st):
 
 
 def main():
+    # Outside text reaches some log lines; one that will not encode must not end the run.
+    sys.stdout.reconfigure(errors="backslashreplace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--init", action="store_true")
     ap.add_argument("--report", action="store_true")
@@ -3652,7 +3657,7 @@ def finish(sd, args, st, state_path, events):
                     "on the BLAKE2b chain. Depth-1 events are ordinary ties. Pools are identified by coinbase "
                     "tag plus payout address, then payout address, then tag.\n\n")
     alerts = []
-    with open(os.path.join(sd, "events.jsonl"), "a") as ev, open(md_path, "a") as md:
+    with open(os.path.join(sd, "events.jsonl"), "a") as ev, open(md_path, "a", errors="replace") as md:
         for e in events:
             e["_t"] = NOW
             ev.write(json.dumps(e, sort_keys=True) + "\n")
