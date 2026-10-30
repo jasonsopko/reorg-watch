@@ -99,6 +99,7 @@ BRANCH_ALERT_LEN = 3      # a competing branch at least this long...
 BRANCH_ALERT_GAP = 2      # ...whose tip is within this many blocks of ours, or above it
 AHEAD_NOTE = 2            # crawled peers this many blocks past our tip get a note on the page
 MAJORITY_LEAD = 3         # an outside chain on a block this node refused, this far past our tip
+MATURITY_RETRIES = 30     # runs that retry a refused tip's maturity check after a failed node call
 NOW = time.time()
 
 
@@ -1923,8 +1924,14 @@ def maturity_diagnosis(rest, rw, br, pools=None):
 
     for height, bh, prev in refused_branch_blocks(rest, br):
         try:
-            txs = parse_block(rest.block_raw(bh))
-        except Exception:  # noqa: BLE001 - no block data: the node never validated past here
+            raw = rest.block_raw(bh)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:   # no block data: the node never validated past here
+                return None
+            raise               # a failed call: the caller tries again on a later run
+        try:
+            txs = parse_block(raw)
+        except Exception:  # noqa: BLE001 - served data this parser cannot read
             return None
         # Coverage keys on the coinbase block's parent MTP along the spending branch; while the
         # refused block's own parent is short of the expiry, every earlier block is too.
@@ -1972,13 +1979,22 @@ def competing_branch_checks(sd, st, events, now, rest=None, rw=None, pool_list=N
         return
     seen = st.setdefault("risk", {}).setdefault("branch_alerted", {})
     bad = st["risk"].setdefault("invalid_alerted", [])
+    # Refused tips whose maturity check failed on a node call, with the runs left to try it
+    # again. The plain alert went out on the first look; a retry that finds the split sends
+    # the maturity alert after it.
+    retry = st["risk"].setdefault("maturity_retry", {})
+    invalid_now = set()
     for br in d.get("branches", []):
         if br.get("status") == "invalid":
             # A block this node refused to connect: whoever mined it is on other consensus
             # rules. Alert once per block; the tip stays in getchaintips for good.
-            if br.get("tip_hash") in bad:
+            th = br.get("tip_hash")
+            invalid_now.add(th)
+            again = th in retry
+            if th in bad and not again:
                 continue
-            bad.append(br.get("tip_hash"))
+            if not again:
+                bad.append(th)
             pools = {}
             for b in br.get("lost", []):
                 pools[b.get("pool") or "?"] = pools.get(b.get("pool") or "?", 0) + 1
@@ -1988,8 +2004,14 @@ def competing_branch_checks(sd, st, events, now, rest=None, rw=None, pool_list=N
             if rest is not None:
                 try:
                     diag = maturity_diagnosis(rest, rw, br, pool_list)
-                except Exception as e:  # noqa: BLE001 - fall back to the plain alert
-                    print(f"{ts()} maturity check of {br.get('tip_hash')} failed: {e}")
+                    retry.pop(th, None)
+                except Exception as e:  # noqa: BLE001 - the plain alert now, retried on later runs
+                    left = retry.get(th, MATURITY_RETRIES + 1) - 1
+                    if left > 0:
+                        retry[th] = left
+                    else:
+                        retry.pop(th, None)
+                    print(f"{ts()} maturity check of {th} failed, {left} retries left: {e}")
             if diag and diag["hash"] in {x.get("hash") for x in st["risk"].get("split_seen", [])}:
                 continue   # a second invalid tip above a refused block already reported
             if diag:
@@ -1999,6 +2021,8 @@ def competing_branch_checks(sd, st, events, now, rest=None, rw=None, pool_list=N
                 st["risk"].setdefault("split_seen", []).append(
                     {"height": diag["height"], "hash": diag["hash"], "pool": diag["pool"],
                      "coin_height": diag["coin_height"], "depth": diag["depth"], "t": now})
+            elif again:
+                continue   # a retry with nothing new: the plain alert went out on the first look
             events.append(ev)
             continue
         if br.get("status") == "active" or br.get("branchlen", 0) < BRANCH_ALERT_LEN:
@@ -2019,6 +2043,8 @@ def competing_branch_checks(sd, st, events, now, rest=None, rw=None, pool_list=N
                        "pools": dict(sorted(pools.items(), key=lambda kv: -kv[1])[:3])})
     for key in [k for k, v in seen.items() if now - v["t"] > 86400]:
         del seen[key]
+    for key in [k for k in retry if k not in invalid_now]:
+        del retry[key]
 
 
 def agent_counts(peers):
