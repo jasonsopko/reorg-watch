@@ -282,7 +282,9 @@ class Pools:
         if stale:
             try:
                 data = http_get(POOLS_URL, timeout=15)
-                lst = json.loads(data)
+                # Strict UTF-8 first: json.loads on bytes guesses UTF-16 or a BOM and passes
+                # encoded surrogates, and a cache the load below cannot read stops every run.
+                lst = json.loads(data.decode("utf-8"))
                 if not isinstance(lst, list) or not all(isinstance(e, dict) and isinstance(e.get("name"), str) for e in lst):
                     raise ValueError("pools list is not a list of entries with a name")
                 with open(cache + ".tmp", "wb") as f:
