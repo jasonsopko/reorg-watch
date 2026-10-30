@@ -13,8 +13,9 @@ mined the losing block, which on a chain with one pool near half the hashrate is
 worth knowing.
 
 Credentials: ~/.reorg-watch/rpc.conf holding one line "user:password" (chmod 600), or the
-node's .cookie if this user can read it. Only getchaintips is called, so the RPC user can
-be whitelisted to exactly that.
+node's .cookie if this user can read it. The calls are getchaintips, getpeerinfo, and
+getblockheader below an invalid tip whose block never arrived, so the RPC user can be
+whitelisted to exactly those.
 
 Usage: chain-tips.py [--rpc URL] [--rest URL] [--state DIR] [--depth N] [--fixture FILE]
 """
@@ -88,6 +89,21 @@ def branch_blocks(rest, pools, tip_hash, branchlen, cap):
     return list(reversed(out))
 
 
+def held_below(call, rest, tip_hash, branchlen, cap=2016):
+    """The newest block on a branch whose data the node holds, and how many blocks of the branch
+    run from there down to the fork. A refused block's descendants are marked invalid too,
+    headers included, so an invalid tip can be a header whose block never arrived. REST serves
+    no headers off the active chain; getblockheader serves any header the node knows."""
+    h = tip_hash
+    for i in range(min(branchlen, cap)):
+        if rest.block_notx(h):
+            return h, branchlen - i
+        h = call("getblockheader", [h]).get("previousblockhash")
+        if not h:
+            break
+    return None, 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rpc", default="http://127.0.0.1:8332/")
@@ -135,6 +151,14 @@ def main():
             continue
         blocks = [] if t["status"] == "headers-only" else branch_blocks(
             rest, pools, t["hash"], t["branchlen"], args.cap)
+        if not blocks and t["status"] == "invalid" and not args.fixture:
+            try:
+                h, n = held_below(lambda m, p: rpc(args.rpc, credentials(args.state), m, p),
+                                  rest, t["hash"], t["branchlen"])
+                if h:
+                    blocks = branch_blocks(rest, pools, h, n, args.cap)
+            except Exception as e:
+                print("could not read below invalid tip %s: %s" % (t["hash"], e), file=sys.stderr)
         forked_at = (blocks[0]["height"] - 1) if blocks else (t["height"] - t["branchlen"])
         winners = []
         for hh in range(forked_at + 1, min(t["height"], active["height"]) + 1):
