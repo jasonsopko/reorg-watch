@@ -1107,7 +1107,7 @@ def line_for(e):
                 f"under {e['labels']} solo, unknown or category labels{base}). A pool paying each miner at its own address looks like this")
     if t == "invalid_block" and e.get("maturity"):
         m = e["maturity"]
-        more = f", and {m['more']} more early coinbase spends" if m.get("more") else ""
+        more = f", and {m['more']} more early coinbase spend{'s' if m['more'] > 1 else ''}" if m.get("more") else ""
         return (f"ALERT block {e['height']} {e['hash']} is invalid under the Knots 29.4.3 coinbase maturity rule; "
                 f"mined by {one_line(m['pool'])}. It spends the coinbase of block {m['coin_height']} "
                 f"({one_line(m['coin_pool'])}) at depth {m['depth']}{more}. 29.4.3 requires {m['need']} blocks "
