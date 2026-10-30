@@ -29,7 +29,7 @@ Prints nothing unless something happened.
 Usage: reorg-watch.py [--init] [--report] [--state DIR] [--rest URL]
                       [--explorer URL] [--notify CMD] [--alert-depth N]
                       [--keep N] [--floor H] [--html FILE] [--no-rewards]
-                      [--sweep-btc N] [--verbose]
+                      [--sweep-btc N] [--maturity S:E:R[:T]] [--verbose]
   --init          seed the window from the node without logging history
   --report        print the current state and recent events, then exit
   --state DIR     state directory (default ~/.reorg-watch)
@@ -49,6 +49,9 @@ Usage: reorg-watch.py [--init] [--report] [--state DIR] [--rest URL]
                   e.g. America/New_York; browsers with JavaScript re-render
                   every time in the viewer's own zone (default UTC; logs and
                   JSON files always use UTC)
+  --maturity S:E:R[:T]  regtest only: the coinbase maturity schedule given to
+                  -testcoinbasematuritylong (and -testcoinbasematuritylongexpiry),
+                  in place of the mainnet Knots 29.4.3 schedule
 
 Files in the state dir: state.json, rewards.json, events.jsonl,
 reorg-log.md, pools-v2.json (cache), lock.
@@ -1100,6 +1103,14 @@ def line_for(e):
         base = f"; prior week {e['baseline_share']}%" if e.get("baseline_share") is not None else ""
         return (f"ALERT blocks no pool name claims: {e['share']}% of the last {e['hours']} h ({e['blocks']}/{e['of']} blocks "
                 f"under {e['labels']} solo, unknown or category labels{base}). A pool paying each miner at its own address looks like this")
+    if t == "invalid_block" and e.get("maturity"):
+        m = e["maturity"]
+        more = f", and {m['more']} more early coinbase spends" if m.get("more") else ""
+        return (f"ALERT block {e['height']} {e['hash']} is invalid under the Knots 29.4.3 coinbase maturity rule; "
+                f"mined by {one_line(m['pool'])}. It spends the coinbase of block {m['coin_height']} "
+                f"({one_line(m['coin_pool'])}) at depth {m['depth']}{more}. 29.4.3 requires {m['need']} blocks "
+                f"for that coinbase and 29.4.2 requires {m['need_2942']}, so nodes still on 29.4.2 accept this "
+                f"spend. This node cannot follow a chain built on this block")
     if t == "invalid_block":
         who = ", ".join(f"{p} {n}" for p, n in e["pools"].items()) or "unknown"
         return (f"ALERT block {e['height']} {e['hash'][:16]} is invalid under this node's rules; mined by {who}. "
@@ -1791,7 +1802,113 @@ def concentration_checks(sd, st, events, now, rw=None):
     return m
 
 
-def competing_branch_checks(sd, st, events, now):
+def one_line(s, cap=80):
+    """Text from the chain or a peer, made safe for a one-line alert: printable ASCII only."""
+    return re.sub(r"[^\x20-\x7e]", " ", str(s))[:cap]
+
+
+def mtp_of(rest, blockhash):
+    """Median time past of a block. REST serves headers only on the active chain; off it, the
+    block's own record carries the same field, for any block whose data the node holds."""
+    hd = rest.json(f"headers/1/{blockhash}.json")
+    return hd[0]["mediantime"] if hd else rest.block_notx(blockhash)["mediantime"]
+
+
+def refused_branch_blocks(rest, br, cap=144):
+    """(height, hash, parent hash) of each block on an invalid branch whose data the node holds,
+    oldest first. REST serves no headers off the active chain, so this walks block records
+    down from the oldest held block chain-tips.json names (it keeps the newest dozen)."""
+    fork_h = br["tip_height"] - br["branchlen"]
+    held = sorted((b for b in br.get("lost", []) if b.get("ntx") is not None and b.get("hash")),
+                  key=lambda b: b["height"])
+    out, h = [], held[0]["hash"] if held else br.get("tip_hash")
+    while h and len(out) < cap:
+        b = rest.block_notx(h)
+        if not b or b["height"] <= fork_h:
+            break
+        out.append((b["height"], h, b.get("previousblockhash")))
+        h = b.get("previousblockhash")
+    out.reverse()
+    for b in held[1:]:
+        if not out or b["height"] != out[-1][0] + 1:
+            break
+        out.append((b["height"], b["hash"], out[-1][1]))
+    return out
+
+
+def maturity_diagnosis(rest, rw, br, pools=None):
+    """Whether this node refused a branch for the Knots 29.4.3 coinbase maturity rule. Reads
+    the branch oldest first over REST (the node serves a refused block it holds) and stops at
+    the first block that spends a coinbase earlier than 29.4.3 allows. Returns None when no
+    block fails that rule, or when the early spend also fails 29.4.2's rule, since then both
+    versions refuse it and it is not the split."""
+    rule = MATURITY
+    cbs = rw.d["coinbases"] if rw is not None else {}
+    fork_h = br["tip_height"] - br["branchlen"]
+    # The reward index covers the active chain to its tip; without it, or behind the fork point,
+    # ask the node's transaction index, a bounded number of times.
+    use_tx = rw is None or (rw.d.get("scanned_to") or 0) < fork_h
+    lookups = [3000]
+    side = {}   # coinbases mined on the branch itself: txid -> (height, parent hash)
+
+    def origin(txid):
+        if txid in side:
+            return side[txid] + ("this branch",)
+        if txid in cbs:
+            return cbs[txid]["h"], None, cbs[txid]["label"]
+        if not use_tx or lookups[0] <= 0:
+            return None
+        lookups[0] -= 1
+        tx = rest.tx(txid)
+        if not tx or "coinbase" not in (tx.get("vin") or [{}])[0] or not tx.get("blockhash"):
+            return None
+        h = rest.json(f"headers/1/{tx['blockhash']}.json")[0]["height"]
+        return h, None, describe_block(rest, pools, h, tx["blockhash"])["pool"] if pools else "unknown"
+
+    mtps = {}
+
+    def parent_mtp(coin_h, coin_parent):
+        # one REST read per coinbase height; after the expiry every early input needs one
+        if (coin_h, coin_parent) not in mtps:
+            mtps[coin_h, coin_parent] = mtp_of(rest, coin_parent or rest.hash_at(coin_h - 1))
+        return mtps[coin_h, coin_parent]
+
+    for height, bh, prev in refused_branch_blocks(rest, br):
+        try:
+            txs = parse_block(rest.block_raw(bh))
+        except Exception:  # noqa: BLE001 - no block data: the node never validated past here
+            return None
+        # Coverage keys on the coinbase block's parent MTP along the spending branch; while the
+        # refused block's own parent is short of the expiry, every earlier block is too.
+        all_covered = rule.expiry is None or parent_mtp(height, prev) < rule.expiry
+        early = []
+        for tx in txs:
+            if tx["coinbase"]:
+                side[tx["txid"]] = (height, prev)
+                continue
+            for p, n in tx["vin"]:
+                o = origin(p)
+                if o is None:
+                    continue
+                coin_h, coin_parent, label = o
+                covered = all_covered or rule.covered(parent_mtp(coin_h, coin_parent))
+                depth, need = height - coin_h, rule.need(coin_h, height, covered)
+                if depth < need:
+                    early.append({"coin_height": coin_h, "coin_txid": p, "vout": n, "coin_pool": label,
+                                  "depth": depth, "need": need, "need_2942": rule.need_2942(coin_h, height)})
+        if not early:
+            continue
+        if any(x["depth"] < x["need_2942"] for x in early):
+            return None
+        early.sort(key=lambda x: (x["depth"], x["coin_height"]))
+        pool = next((b.get("pool") for b in br.get("lost", []) if b.get("hash") == bh), None)
+        if pool is None:
+            pool = describe_block(rest, pools, height, bh)["pool"] if pools else "unknown"
+        return dict(early[0], height=height, hash=bh, pool=pool, more=len(early) - 1)
+    return None
+
+
+def competing_branch_checks(sd, st, events, now, rest=None, rw=None, pool_list=None):
     """A rival chain being built alongside ours. chain-tips.py writes every branch the node
     knows about once a minute; a branch that is long and close to our tip, or ahead of it in
     headers we have not validated, is what a reorg looks like before it happens. Alert once
@@ -1817,8 +1934,24 @@ def competing_branch_checks(sd, st, events, now):
             pools = {}
             for b in br.get("lost", []):
                 pools[b.get("pool") or "?"] = pools.get(b.get("pool") or "?", 0) + 1
-            events.append({"type": "invalid_block", "level": "ALERT", "height": br["tip_height"],
-                           "hash": br.get("tip_hash") or "", "active_height": H, "pools": pools})
+            ev = {"type": "invalid_block", "level": "ALERT", "height": br["tip_height"],
+                  "hash": br.get("tip_hash") or "", "active_height": H, "pools": pools}
+            diag = None
+            if rest is not None:
+                try:
+                    diag = maturity_diagnosis(rest, rw, br, pool_list)
+                except Exception as e:  # noqa: BLE001 - fall back to the plain alert
+                    print(f"{ts()} maturity check of {br.get('tip_hash')} failed: {e}")
+            if diag and diag["hash"] in {x.get("hash") for x in st["risk"].get("split_seen", [])}:
+                continue   # a second invalid tip above a refused block already reported
+            if diag:
+                ev.update(height=diag["height"], hash=diag["hash"],
+                          maturity={k: diag[k] for k in ("pool", "coin_height", "coin_txid", "vout", "coin_pool",
+                                                         "depth", "need", "need_2942", "more")})
+                st["risk"].setdefault("split_seen", []).append(
+                    {"height": diag["height"], "hash": diag["hash"], "pool": diag["pool"],
+                     "coin_height": diag["coin_height"], "depth": diag["depth"], "t": now})
+            events.append(ev)
             continue
         if br.get("status") == "active" or br.get("branchlen", 0) < BRANCH_ALERT_LEN:
             continue
@@ -3182,8 +3315,12 @@ def main():
     ap.add_argument("--tz", default="UTC", help="time zone for the status page, e.g. America/New_York")
     ap.add_argument("--sweep-btc", type=float, default=10.0)
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--maturity", help="regtest: START:ENFORCE:RELEASE[:EXPIRY], the values given to "
+                    "-testcoinbasematuritylong[expiry]; replaces the mainnet coinbase maturity schedule")
     args = ap.parse_args()
-    global PAGE_TZ
+    global PAGE_TZ, MATURITY
+    if args.maturity:
+        MATURITY = Maturity.regtest(args.maturity)
     try:
         PAGE_TZ = ZoneInfo(args.tz)
     except Exception:  # noqa: BLE001
@@ -3309,7 +3446,7 @@ def main():
             print(f"{ts()} reward index failed: {e}")
 
     concentration_checks(sd, st, events, NOW, rw)
-    competing_branch_checks(sd, st, events, NOW)
+    competing_branch_checks(sd, st, events, NOW, rest, rw, pools)
 
     finish(sd, args, st, state_path, events)
     if args.verbose and not events:
