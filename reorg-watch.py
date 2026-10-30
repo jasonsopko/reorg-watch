@@ -3491,7 +3491,9 @@ def finish(sd, args, st, state_path, events):
             line = line_for(e)
             print(f"{ts()} {line}")
             if e.get("level") == "ALERT":
-                alerts.append(line)
+                # Pool names from the pools list reach these lines; a newline in one would put
+                # a line of its author's choosing in the mail, looking like an alert of its own.
+                alerts.append(re.sub(r"[\x00-\x1f\x7f]", " ", line))
     if alerts and args.notify:
         msg = "reorg-watch " + ts() + "\n" + "\n".join(alerts) + "\n"
         try:
