@@ -268,6 +268,26 @@ class Rest:
         return http_get(f"{self.base}/block/{blockhash}.bin", timeout=30)
 
 
+def pool_entries(lst):
+    """(name, addresses, tags) for each entry of the pools list with a string name. The list is
+    written for mempool's pools parser, which reads a null addresses or tags as [] and takes items
+    of any type. Read raw, a null field, a nonzero number as a tag or a list as an address raises
+    TypeError, and "tags": "ab" gives the tags "a" and "b". So here an entry without a string name
+    is skipped, a string field reads as a list of that one string, any other field that is not a
+    list reads as [], and an item that is not a non-empty string is dropped."""
+    out = []
+    for e in lst if isinstance(lst, list) else []:
+        if not isinstance(e, dict) or not isinstance(e.get("name"), str):
+            continue
+        fields = []
+        for k in ("addresses", "tags"):
+            v = e.get(k)
+            v = [v] if isinstance(v, str) else v
+            fields.append([x for x in v if isinstance(x, str) and x] if isinstance(v, list) else [])
+        out.append((e["name"], *fields))
+    return out
+
+
 class Pools:
     def __init__(self, cache, verbose=False):
         self.by_addr = {}
@@ -287,6 +307,9 @@ class Pools:
                 lst = json.loads(data.decode("utf-8"))
                 if not isinstance(lst, list) or not all(isinstance(e, dict) and isinstance(e.get("name"), str) for e in lst):
                     raise ValueError("pools list is not a list of entries with a name")
+                # An empty list, or one with no usable address or tag, names every new block Unknown.
+                if not any(addrs or tags for _, addrs, tags in pool_entries(lst)):
+                    raise ValueError("pools list has no usable address or tag")
                 with open(cache + ".tmp", "wb") as f:
                     f.write(data)
                 os.replace(cache + ".tmp", cache)
@@ -297,13 +320,12 @@ class Pools:
                     os.utime(cache)  # back off for another 6 h
         if os.path.exists(cache):
             with open(cache) as f:
-                for e in json.load(f):
-                    for a in e.get("addresses", []):
-                        self.by_addr[a] = e["name"]
-                        self.names_by_addr.setdefault(a, set()).add(e["name"])
-                    for t in e.get("tags", []):
-                        if t:
-                            self.tags.append((t, e["name"]))
+                for name, addrs, tags in pool_entries(json.load(f)):
+                    for a in addrs:
+                        self.by_addr[a] = name
+                        self.names_by_addr.setdefault(a, set()).add(name)
+                    for t in tags:
+                        self.tags.append((t, name))
             self.tags.sort(key=lambda x: -len(x[0]))
 
     def identify(self, addrs, tag):
