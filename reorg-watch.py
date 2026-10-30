@@ -1485,6 +1485,30 @@ def fork_dag(branches, active, colormap, peers_at_tip, E, recent, keep=4):
             f'height="{H}" role="img" aria-label="block tree">{"".join(parts)}</svg></div>')
 
 
+def split_watch_html(st, E):
+    """One line on the Knots 29.4.2 / 29.4.3 coinbase maturity split and what has been seen of it."""
+    m = MATURITY
+    risk = st.get("risk", {})
+    seen = risk.get("split_seen", [])
+    if seen:
+        x = seen[-1]
+        more = f"{len(seen)} blocks refused for it, the latest " if len(seen) > 1 else ""
+        got = (f"{more}block {int(x['height'])}, mined by {E(str(x.get('pool')))}, spending the coinbase of block "
+               f"{int(x['coin_height'])} at depth {int(x['depth'])}.")
+        ahead = risk.get("refused_ahead", {}).get(x.get("hash"))
+        if ahead:
+            src = " and ".join(E("peers asked directly" if s == "peers" else str(s)) for s in ahead.get("src", []))
+            got += (f" Its branch reached {int(ahead['tip'])} ({src}), {int(ahead['lead'])} blocks past this "
+                    f"node, at {tt(ahead['t'], 'minute')}.")
+    else:
+        got = "none."
+    until = f" until {datetime.fromtimestamp(m.expiry, timezone.utc):%Y-%m-%d} (by median time past)" if m.expiry else " on"
+    return (f'<p class="note">Watching for the Knots 29.4.2 and 29.4.3 split from block {m.first_split}: a '
+            f'coinbase mined from block {m.start}{until} can be spent after 100 blocks on 29.4.2 but only after '
+            f'{m.depth:,} (about {round(m.depth / 144)} days) on 29.4.3, which this node runs. Every block this '
+            f'node refuses is checked for that. Seen so far: {got}</p>')
+
+
 def render_forks(sd, E, colormap, st):
     """Branches the node knows but did not build on, the pool on each side, and the peers."""
     try:
@@ -1566,8 +1590,9 @@ def render_forks(sd, E, colormap, st):
             if b:
                 recent.append((h, b.get("pool", "unknown"), chain.get(str(h), "")))
 
+    split_html = split_watch_html(st, E)
     if not branches and not recent:
-        return (f'<h2>Competing branches</h2>\n{peer_html}{crawl_html}<p class="note">No branch other '
+        return (f'<h2>Competing branches</h2>\n{split_html}{peer_html}{crawl_html}<p class="note">No branch other '
                 f'than the one this node is building on has appeared since the fork block. '
                 f'Checked {gen}.</p>\n')
 
@@ -1581,7 +1606,7 @@ def render_forks(sd, E, colormap, st):
     legend = " ".join(f'<span class="fkey" style="background:{c}">{k}</span>'
                       for k, c in STATUS_COLOR.items() if k != "headers-only")
 
-    return (f'<h2>Competing branches</h2>\n{peer_html}{crawl_html}'
+    return (f'<h2>Competing branches</h2>\n{split_html}{peer_html}{crawl_html}'
             f'<p class="note"><strong>{len(branches)}</strong> heights have been contested since the '
             f'fork block: two miners solved the same height and this node kept one of them. Nearly all '
             f'resolved in a single block and never became a reorg, which is why the reorg counters above '
