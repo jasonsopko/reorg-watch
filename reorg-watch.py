@@ -95,22 +95,82 @@ UNATTRIBUTED_MIN_BLOCKS = 60   # and at least this many blocks in those 24 h
 BRANCH_ALERT_LEN = 3      # a competing branch at least this long...
 BRANCH_ALERT_GAP = 2      # ...whose tip is within this many blocks of ours, or above it
 AHEAD_NOTE = 2            # crawled peers this many blocks past our tip get a note on the page
-# Knots 29.4.2 (part 1 of 3): coinbases mined from LONG_MATURITY_START cannot be spent before
-# LONG_MATURITY_RELEASE, about 45 days. Below the start height the 100-block rule still holds.
-LONG_MATURITY_START = 973440
-LONG_MATURITY_RELEASE = 979920
 NOW = time.time()
+
+
+class Maturity:
+    """Coinbase maturity as Knots 29.4.3 checks it: Consensus::CheckTxInputs and
+    CoinbaseMaturityLongEndHeight in src/consensus/tx_verify.cpp, with the mainnet values from
+    src/kernel/chainparams.cpp at v29.4.3.knots20260508. A spend must pass both rules:
+      historical, kept from 29.4.2: while the spend is below 979920, a coinbase from 973440 on
+        needs 979920 - 973440 = 6480 blocks (about 45 days)
+      rolling, new in 29.4.3: from spend height 979919, a coinbase from 979919 on needs 25920
+        blocks (180 days), unless the block before it has a median time past at or after the
+        RDTS expiry (2027-09-01 00:00 UTC); such a coinbase needs 100
+    Every other coinbase needs 100. Knots 29.4.2 has only the historical rule, ending at 979920.
+    regtest() builds the schedule -testcoinbasematuritylong[expiry] sets, with no historical rule."""
+
+    def __init__(self, start=979919, enforce=979919, depth=180 * 144, release=None, expiry=1819756800,
+                 historical=(973440, 979920)):
+        self.start, self.enforce, self.depth = start, enforce, depth
+        self.release = release        # None: enforced until expiry (CoinbaseMaturityLongUntilRdts)
+        self.expiry = expiry          # None: height-bounded, no expiry
+        self.historical = historical  # (start, release) of the 29.4.2 rule, or None
+        # The first spend height where 29.4.3 can refuse what 29.4.2 accepts: a coinbase from
+        # the start height at depth 100, once the historical rule has ended.
+        self.first_split = max(start + 100, enforce, historical[1] if historical else 0)
+
+    @classmethod
+    def regtest(cls, arg):
+        """START:ENFORCE:RELEASE[:EXPIRY], the values of -testcoinbasematuritylong and
+        -testcoinbasematuritylongexpiry. With an expiry, RELEASE - START is the rolling depth and
+        RELEASE does not end enforcement, as in src/kernel/chainparams.cpp."""
+        v = [int(x) for x in arg.split(":")]
+        if len(v) not in (3, 4) or not v[0] < v[2] or v[2] - v[0] <= 100:
+            raise ValueError(f"bad maturity schedule {arg!r}")
+        return cls(v[0], v[1], v[2] - v[0], None if len(v) == 4 else v[2], v[3] if len(v) == 4 else None, None)
+
+    def covered(self, parent_mtp):
+        """Whether the rolling rule covers a coinbase whose block's parent has this median time past."""
+        return self.expiry is None or parent_mtp < self.expiry
+
+    def need(self, coin_h, spend_h, covered=True):
+        """Blocks a coinbase mined at coin_h must wait before a block at spend_h may spend it."""
+        n = 100
+        if self.historical and self.historical[0] <= spend_h < self.historical[1] and coin_h >= self.historical[0]:
+            n = self.historical[1] - self.historical[0]
+        if (spend_h >= self.enforce and (self.release is None or spend_h < self.release)
+                and coin_h >= self.start and covered):
+            n = max(n, self.depth)
+        return n
+
+    def need_2942(self, coin_h, spend_h):
+        """The same under Knots 29.4.2: the historical rule only."""
+        hs = self.historical
+        return hs[1] - hs[0] if hs and hs[0] <= spend_h < hs[1] and coin_h >= hs[0] else 100
+
+    def spendable_from(self, coin_h, covered=True):
+        """First height at which the coinbase mined at coin_h can be spent. need() only changes at
+        the rule boundaries, so the answer is one of these candidates."""
+        hs = self.historical or (coin_h, coin_h)
+        cands = {coin_h + 100, coin_h + self.depth, coin_h + hs[1] - hs[0], hs[0], hs[1], self.enforce,
+                 self.release or coin_h}
+        return min(s for s in cands if s >= coin_h + 100 and s - coin_h >= self.need(coin_h, s, covered))
+
+
+MATURITY = Maturity()
 
 
 def ts(t=None):
     return time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(NOW if t is None else t))
 
 
-def mature_at(h):
-    """First height at which the coinbase mined at height h can be spent."""
-    if h >= LONG_MATURITY_START:
-        return max(h + 100, LONG_MATURITY_RELEASE)
-    return h + 100
+def mature_at(h, t=None):
+    """First height at which the coinbase mined at height h, header time t, can be spent. The
+    rule keys on the parent block's median time past; the block's own time stands in for it.
+    The two usually differ by about an hour, so only rewards mined near the expiry can land on
+    the wrong side, and only on the page."""
+    return MATURITY.spendable_from(h, t is None or MATURITY.covered(t))
 
 
 PAGE_TZ = ZoneInfo("UTC")
@@ -875,7 +935,7 @@ class Rewards:
                  "paid_mined": 0, "recent": cs[-20:]}
             for c in cs:
                 sats = sum(v for _, v in c["outs"].values())
-                matured = tip >= mature_at(c["h"])
+                matured = tip >= mature_at(c["h"], c.get("t"))
                 p["mined"] += sats
                 p["cls"][c.get("cls", "O")] = p["cls"].get(c.get("cls", "O"), 0) + 1
                 p["nouts"].append(len(c["outs"]))
@@ -1082,7 +1142,7 @@ TIPS = {
     "blocks_fork": "All blocks this label has mined since the fork at height 961640.",
     "payout": "How the reward leaves this label's blocks, read from its last 20 coinbases, so a pool that changes how it pays shows up within a day or two: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Paid in the coinbase to one address, not the pool's: one or two outputs with most of the value to an address that is not one of the pool's known addresses, while the pool's own address takes a small share such as its fee. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
     "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC. For a pool that pays its miners in the coinbase, most of this went straight to the miners; hover the number for the split.",
-    "matured": "The pool's own rewards that are spendable now. Its miners' shares paid in the coinbase are not counted here, or in Moved and Held. Mined at least 100 blocks ago, Mined at least 100 blocks ago, except that coinbases from block 973440 stay locked until block 979920 (about 45 days) under Knots 29.4.2, and count as matured only from there.",
+    "matured": "The pool's own rewards that are spendable now. Its miners' shares paid in the coinbase are not counted here, or in Moved and Held. Mined at least 100 blocks ago, with two exceptions under Knots 29.4.3, which this node runs: coinbases from block 973440 to 979918 stay locked until block 979920 (about 45 days), and coinbases from block 979919 on stay locked for 25,920 blocks (about 180 days). Rewards mined once the median time past reaches 2027-09-01 00:00 UTC go back to 100 blocks.",
     "moved": "The pool's own coinbase outputs that have been spent in any later transaction, whether a payout to miners, a consolidation, or a transfer. The chain shows movement, not a sale.",
     "moved_pct": "Moved divided by matured. 100 percent means every spendable reward has left the coinbase address.",
     "held": "The pool's own rewards not yet moved, including ones not yet mature. A pool that pays its miners in the coinbase holds nothing of theirs; what it holds is its own output, if it takes one.",
