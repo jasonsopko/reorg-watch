@@ -1151,7 +1151,7 @@ def line_for(e):
             ag = ", ".join(f"{one_line(k, 12)} x{n}" for k, n in p["agents"].items())
             src.append(f"{p['n']} of {p['of']} peers on this chain that answered peer-crawl at {one_line(p['at'], 20)} "
                        f"send headers on it up to {p['best']}, work checked ({ag})")
-        tail = ("Nodes still on Knots 29.4.2 follow that branch; this node and other 29.4.3 nodes do not" if e.get("split")
+        tail = ("Nodes still on Knots 29.4.2 follow that branch; this node and other nodes on 29.4.3 or 29.5 do not" if e.get("split")
                 else "Nodes that accept that block follow that branch; this node does not")
         return (f"ALERT the branch this node refused at block {e['height']} {e['hash']} may be the majority: it reaches "
                 f"{e['best']}, {e['lead']} blocks past this node's tip {e['active_height']}. {'; '.join(src)}. {tail}")
@@ -1193,7 +1193,7 @@ TIPS = {
     "blocks_fork": "All blocks this label has mined since the fork at height 961640.",
     "payout": "How the reward leaves this label's blocks, read from its last 20 coinbases, so a pool that changes how it pays shows up within a day or two: the median number of value-bearing outputs and the share of all value paid to the single most-paid address. Paid to miners in the coinbase: three or more outputs, the shares are in the block itself. Paid to the finder in the coinbase: one or two outputs but to a different address nearly every block, so whoever found the block was paid in it. Paid in the coinbase to one address, not the pool's: one or two outputs with most of the value to an address that is not one of the pool's known addresses, while the pool's own address takes a small share such as its fee. Held by the pool, paid later: one or two outputs with most of the value to one address, so the pool receives every reward and pays miners afterwards from its balance; earlier versions of this page called this pool custody. Solo: one miner paying their own address. All to one address: a label this page cannot place as a pool or a solo miner.",
     "mined": "Sum of this pool's coinbase outputs since the fork: subsidy plus fees, in BTC. For a pool that pays its miners in the coinbase, most of this went straight to the miners; hover the number for the split.",
-    "matured": "The pool's own rewards that are spendable now. Its miners' shares paid in the coinbase are not counted here, or in Moved and Held. Mined at least 100 blocks ago, with two exceptions under Knots 29.4.3, which this node runs: coinbases from block 973440 to 979820 stay locked until block 979920, and coinbases from block 979919 on stay locked for 25,920 blocks (about 180 days); those from 979821 to 979918 need the usual 100. Rewards mined once the median time past reaches 2027-09-01 00:00 UTC go back to 100 blocks.",
+    "matured": "The pool's own rewards that are spendable now. Its miners' shares paid in the coinbase are not counted here, or in Moved and Held. Mined at least 100 blocks ago, with two exceptions under Knots 29.4.3 and 29.5, whose rules this node follows: coinbases from block 973440 to 979820 stay locked until block 979920, and coinbases from block 979919 on stay locked for 25,920 blocks (about 180 days); those from 979821 to 979918 need the usual 100. Rewards mined once the median time past reaches 2027-09-01 00:00 UTC go back to 100 blocks.",
     "moved": "The pool's own coinbase outputs that have been spent in any later transaction, whether a payout to miners, a consolidation, or a transfer. The chain shows movement, not a sale.",
     "moved_pct": "Moved divided by matured. 100 percent means every spendable reward has left the coinbase address.",
     "held": "The pool's own rewards not yet moved, including ones not yet mature. A pool that pays its miners in the coinbase holds nothing of theirs; what it holds is its own output, if it takes one.",
@@ -1530,7 +1530,7 @@ def split_watch_html(st, E):
     until = f" until {datetime.fromtimestamp(m.expiry, timezone.utc):%Y-%m-%d} (by median time past)" if m.expiry else " on"
     return (f'<p class="note">Watching for the Knots 29.4.2 and 29.4.3 split from block {m.first_split}: a '
             f'coinbase mined from block {m.start}{until} can be spent after 100 blocks on 29.4.2 but only after '
-            f'{m.depth:,} (about {round(m.depth / 144)} days) on 29.4.3, which this node runs. Every block this '
+            f'{m.depth:,} (about {round(m.depth / 144)} days) on 29.4.3 and 29.5, whose rules this node follows. Every block this '
             f'node refuses is checked for that. Seen so far: {got}</p>')
 
 
